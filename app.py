@@ -64,7 +64,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>meghan.ai - Doctor Network Checker</title>
+    <title>Doctor Network Checker</title>
     <style>
         * {
             box-sizing: border-box;
@@ -79,13 +79,6 @@ HTML_TEMPLATE = """
         h1 {
             color: #1f2937;
             margin-bottom: 5px;
-        }
-        .brand {
-            background: linear-gradient(135deg, #8b5cf6, #ec4899);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            font-weight: 700;
         }
         .subtitle {
             color: #666;
@@ -266,10 +259,28 @@ HTML_TEMPLATE = """
             background: #fee2e2;
             color: #991b1b;
         }
+        .footer {
+            text-align: center;
+            margin-top: 48px;
+            padding: 24px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .footer a {
+            background: linear-gradient(135deg, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
-    <h1><span class="brand">meghan.ai</span> Doctor Network Checker</h1>
+    <h1>Doctor Network Checker</h1>
     <p class="subtitle">Search for doctors in the NPI Registry and get insurance network links</p>
 
     <div class="search-form">
@@ -403,6 +414,10 @@ HTML_TEMPLATE = """
             btn.textContent = 'Search Doctors';
         });
     </script>
+
+    <footer class="footer">
+        <a href="https://sommer.computer" target="_blank" rel="noopener noreferrer">sommer.computer</a>
+    </footer>
 </body>
 </html>
 """
