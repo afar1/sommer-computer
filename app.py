@@ -277,6 +277,27 @@ HTML_TEMPLATE = """
         .footer a:hover {
             opacity: 0.9;
         }
+        @media (max-width: 540px) {
+            body {
+                padding: 12px;
+            }
+            .search-form {
+                padding: 16px;
+            }
+            .form-row {
+                flex-direction: column;
+                gap: 0;
+            }
+            .result-card {
+                padding: 16px;
+            }
+            .network-link {
+                padding: 12px 16px;
+                min-height: 44px;
+                display: inline-flex;
+                align-items: center;
+            }
+        }
     </style>
 </head>
 <body>
