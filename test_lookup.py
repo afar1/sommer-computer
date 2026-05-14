@@ -250,21 +250,27 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         mock_check.assert_not_called()
 
-    def test_source_check_route_can_run_sync(self):
+    def test_source_status_route_reads_committed_snapshot_without_refresh(self):
         cache = {
             "last_checked": web_app.utc_now_iso(),
             "ttl_seconds": web_app.SOURCE_FRESHNESS_TTL_SECONDS,
             "puf": {"status": "ok"},
-            "sources": [],
+            "sources": [{"status": "ok"}],
         }
 
-        with patch.object(web_app, "check_source_freshness", return_value=cache):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(web_app, "SOURCE_FRESHNESS_CACHE_PATH", os.path.join(tmpdir, "sources.json")), \
+             patch.object(web_app, "check_source_freshness") as mock_check:
+            with open(web_app.SOURCE_FRESHNESS_CACHE_PATH, "w", encoding="utf-8") as handle:
+                json.dump(cache, handle)
             client = web_app.app.test_client()
-            response = client.post("/sources/check?sync=1")
+            response = client.get("/sources/status")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "fresh")
+        self.assertEqual(response.json["counts"]["ok"], 1)
         self.assertFalse(response.json["in_progress"])
+        mock_check.assert_not_called()
 
     def test_marketplace_plan_lookup_filters_matching_plan_ids(self):
         web_app.get_marketplace_plan_ids.cache_clear()
@@ -785,10 +791,10 @@ class LookupTests(unittest.TestCase):
         self.assertIn("lookup-item-heading", html)
         self.assertIn("lookup-item-meta", html)
         self.assertIn("Last updated", html)
-        self.assertIn("Check for updates", html)
+        self.assertNotIn("Check for updates", html)
         self.assertNotIn("freshness-pill", html)
         self.assertIn("/sources/status", html)
-        self.assertIn("/sources/check", html)
+        self.assertNotIn("/sources/check", html)
         self.assertIn("renderSourceStatus", html)
         self.assertIn("network-matrix tbody tr.lookup-row:hover td:not(:first-child)", html)
         self.assertIn("border-left: 1px solid #eef2f7", html)

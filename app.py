@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 import re
-import threading
+import sys
 
 from flask import Flask, render_template_string, request, jsonify
 import requests
@@ -30,7 +30,7 @@ SOURCE_FRESHNESS_TIMEOUT = 5
 SOURCE_FRESHNESS_TTL_SECONDS = 12 * 60 * 60
 SOURCE_FRESHNESS_CACHE_PATH = os.environ.get(
     "SOURCE_FRESHNESS_CACHE_PATH",
-    os.path.join(os.path.expanduser("~"), ".cache", "sommer-computer", "source-freshness.json"),
+    os.path.join(os.path.dirname(__file__), "source_freshness.json"),
 )
 CMS_PUF_PAGE_URL = "https://www.cms.gov/marketplace/resources/data/public-use-files"
 CMS_PUF_LABELS = (
@@ -39,9 +39,6 @@ CMS_PUF_LABELS = (
     "Network PUF",
     "Machine-readable URL PUF",
 )
-SOURCE_REFRESH_STATE = {"in_progress": False}
-SOURCE_REFRESH_LOCK = threading.Lock()
-
 # BCBSTX Provider Finder URL templates
 BCBSTX_SEARCH_URLS = {
     "blue_advantage_hmo": {
@@ -553,11 +550,11 @@ def source_freshness_summary(cache=None):
     cache = cache if cache is not None else load_source_freshness_cache()
     if not cache:
         return {
-            "status": "checking" if SOURCE_REFRESH_STATE["in_progress"] else "never_checked",
+            "status": "never_checked",
             "last_checked": "",
             "age_seconds": None,
             "ttl_seconds": SOURCE_FRESHNESS_TTL_SECONDS,
-            "in_progress": SOURCE_REFRESH_STATE["in_progress"],
+            "in_progress": False,
             "counts": {"total": len(flatten_carrier_sources()), "ok": 0, "changed": 0, "suspect": 0, "missing": 0},
             "puf": {},
             "sources": [],
@@ -565,12 +562,7 @@ def source_freshness_summary(cache=None):
 
     counts = Counter(source.get("status", "suspect") for source in cache.get("sources", []))
     age_seconds = source_freshness_age_seconds(cache)
-    stale = age_seconds is None or age_seconds > cache.get("ttl_seconds", SOURCE_FRESHNESS_TTL_SECONDS)
-    if SOURCE_REFRESH_STATE["in_progress"]:
-        status = "checking"
-    elif stale:
-        status = "stale"
-    elif counts.get("changed") or cache.get("puf", {}).get("status") == "changed":
+    if counts.get("changed") or cache.get("puf", {}).get("status") == "changed":
         status = "changed"
     elif counts.get("suspect") or counts.get("missing") or cache.get("puf", {}).get("status") == "suspect":
         status = "suspect"
@@ -582,7 +574,7 @@ def source_freshness_summary(cache=None):
         "last_checked": cache.get("last_checked", ""),
         "age_seconds": age_seconds,
         "ttl_seconds": cache.get("ttl_seconds", SOURCE_FRESHNESS_TTL_SECONDS),
-        "in_progress": SOURCE_REFRESH_STATE["in_progress"],
+        "in_progress": False,
         "counts": {
             "total": len(cache.get("sources", [])),
             "ok": counts.get("ok", 0),
@@ -593,24 +585,6 @@ def source_freshness_summary(cache=None):
         "puf": cache.get("puf", {}),
         "sources": cache.get("sources", []),
     }
-
-
-def run_source_refresh():
-    try:
-        check_source_freshness()
-    finally:
-        with SOURCE_REFRESH_LOCK:
-            SOURCE_REFRESH_STATE["in_progress"] = False
-
-
-def start_source_refresh():
-    with SOURCE_REFRESH_LOCK:
-        if SOURCE_REFRESH_STATE["in_progress"]:
-            return False
-        SOURCE_REFRESH_STATE["in_progress"] = True
-    thread = threading.Thread(target=run_source_refresh, daemon=True)
-    thread.start()
-    return True
 
 
 HTML_TEMPLATE = """
@@ -1145,19 +1119,6 @@ HTML_TEMPLATE = """
             font-size: 12px;
             line-height: 1.35;
         }
-        .source-freshness-action {
-            align-items: center;
-            display: flex;
-            flex: 0 0 auto;
-            gap: 10px;
-        }
-        .source-freshness-button {
-            border-radius: 999px;
-            font-size: 13px;
-            min-height: 36px;
-            padding: 8px 12px;
-            width: auto;
-        }
         .provider-details {
             background: white;
             border-radius: 12px;
@@ -1479,15 +1440,6 @@ HTML_TEMPLATE = """
 
         resultsDiv.addEventListener('pointerleave', clearColumnHover);
 
-        sourceStatusDiv.addEventListener('click', async function(e) {
-            const button = e.target.closest('[data-source-refresh]');
-            if (!button) {
-                return;
-            }
-            button.disabled = true;
-            await refreshSourceStatus();
-        });
-
         for (const link of document.querySelectorAll('[data-sample]')) {
             link.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -1603,16 +1555,13 @@ HTML_TEMPLATE = """
                 ? ` CMS PUF dates: ${pufUpdates.map(([name, date]) => `${name} ${date}`).join('; ')}.`
                 : '';
             const changedCopy = `${counts.changed || 0} changed, ${counts.suspect || 0} suspect, ${counts.missing || 0} missing.`;
-            const isChecking = status.in_progress || status.status === 'checking';
 
             let html = '<div class="source-freshness" aria-label="Last updated">';
             html += '<div>';
             html += '<div class="source-freshness-title">Last updated</div>';
             html += `<div class="source-freshness-copy">${escapeHtml(formatFreshnessTime(status.last_checked))}. ${counts.total || 0} sources watched; ${escapeHtml(changedCopy)}${escapeHtml(pufCopy)}</div>`;
             html += '</div>';
-            html += '<div class="source-freshness-action">';
-            html += `<button type="button" class="source-freshness-button" data-source-refresh ${isChecking ? 'disabled' : ''}>${isChecking ? 'Checking...' : 'Check for updates'}</button>`;
-            html += '</div></div>';
+            html += '</div>';
             sourceStatusDiv.innerHTML = html;
         }
 
@@ -1621,25 +1570,6 @@ HTML_TEMPLATE = """
                 const response = await fetch('/sources/status');
                 const status = await response.json();
                 renderSourceStatus(status);
-                if (status.in_progress || status.status === 'checking') {
-                    window.setTimeout(loadSourceStatus, 1800);
-                }
-            } catch (error) {
-                renderSourceStatus({
-                    status: 'suspect',
-                    counts: {},
-                    last_checked: '',
-                    in_progress: false,
-                });
-            }
-        }
-
-        async function refreshSourceStatus() {
-            try {
-                const response = await fetch('/sources/check', { method: 'POST' });
-                const status = await response.json();
-                renderSourceStatus(status);
-                window.setTimeout(loadSourceStatus, 1800);
             } catch (error) {
                 renderSourceStatus({
                     status: 'suspect',
@@ -2880,29 +2810,6 @@ def index():
 
 @app.route("/sources/status")
 def sources_status():
-    cache = load_source_freshness_cache()
-    age_seconds = source_freshness_age_seconds(cache) if cache else None
-    if not cache or age_seconds is None or age_seconds > SOURCE_FRESHNESS_TTL_SECONDS:
-        start_source_refresh()
-    return jsonify(source_freshness_summary(cache))
-
-
-@app.route("/sources/check", methods=["POST"])
-def sources_check():
-    if request.args.get("sync") == "1":
-        with SOURCE_REFRESH_LOCK:
-            if SOURCE_REFRESH_STATE["in_progress"]:
-                return jsonify(source_freshness_summary())
-            SOURCE_REFRESH_STATE["in_progress"] = True
-        cache = None
-        try:
-            cache = check_source_freshness()
-        finally:
-            with SOURCE_REFRESH_LOCK:
-                SOURCE_REFRESH_STATE["in_progress"] = False
-        return jsonify(source_freshness_summary(cache))
-
-    start_source_refresh()
     return jsonify(source_freshness_summary())
 
 
@@ -2967,6 +2874,18 @@ def search():
 
 
 if __name__ == "__main__":
+    if "--refresh-sources" in sys.argv:
+        refreshed_cache = check_source_freshness()
+        summary = source_freshness_summary(refreshed_cache)
+        print(
+            f"Updated {SOURCE_FRESHNESS_CACHE_PATH}: "
+            f"{summary['counts']['total']} sources, "
+            f"{summary['counts']['changed']} changed, "
+            f"{summary['counts']['suspect']} suspect, "
+            f"{summary['counts']['missing']} missing."
+        )
+        sys.exit(0)
+
     print("\n  Provider Network Checker")
     print("  Open http://127.0.0.1:5050 in your browser\n")
     app.run(debug=True, port=5050)
