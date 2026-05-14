@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Check doctor availability using NPI Registry and generate BCBSTX network search links.
+Check provider availability using NPI Registry and generate BCBSTX network search links.
 
 The NPI Registry is a public government database of all healthcare providers.
 For network-specific verification, this script generates direct links to BCBSTX's
@@ -77,6 +77,7 @@ TEXAS_LOCATIONS = {
 class Doctor:
     name: str
     specialty: Optional[str] = None
+    provider_type: str = "auto"
 
 
 @dataclass
@@ -90,6 +91,12 @@ class NPIResult:
     state: str
     zip_code: str
     phone: str
+
+
+def normalize_provider_type(provider_type: str) -> str:
+    if provider_type in {"doctor", "facility"}:
+        return provider_type
+    return "auto"
 
 
 def geocode_location(location: str) -> tuple[float, float]:
@@ -127,33 +134,39 @@ def search_npi(
     city: Optional[str] = None,
     specialty: Optional[str] = None,
     limit: int = 10,
+    provider_type: str = "doctor",
 ) -> list[NPIResult]:
     """Search the NPI Registry for providers."""
-    # Parse name (handle "Last, First" or "First Last")
-    name_parts = name.replace("Dr.", "").replace("Dr", "").strip()
-
-    if "," in name_parts:
-        last, first = [p.strip() for p in name_parts.split(",", 1)]
-    else:
-        parts = name_parts.split()
-        if len(parts) >= 2:
-            first = parts[0]
-            last = " ".join(parts[1:])
-        else:
-            first = ""
-            last = name_parts
+    provider_type = "facility" if provider_type == "facility" else "doctor"
 
     params = {
         "version": "2.1",
         "limit": limit,
-        "enumeration_type": "NPI-1",  # Individual providers only
+        "enumeration_type": "NPI-2" if provider_type == "facility" else "NPI-1",
         "state": state,
     }
 
-    if first:
-        params["first_name"] = first
-    if last:
-        params["last_name"] = last
+    if provider_type == "facility":
+        params["organization_name"] = name.strip()
+    else:
+        # Parse name (handle "Last, First" or "First Last")
+        name_parts = name.replace("Dr.", "").replace("Dr", "").strip()
+
+        if "," in name_parts:
+            last, first = [p.strip() for p in name_parts.split(",", 1)]
+        else:
+            parts = name_parts.split()
+            if len(parts) >= 2:
+                first = parts[0]
+                last = " ".join(parts[1:])
+            else:
+                first = ""
+                last = name_parts
+
+        if first:
+            params["first_name"] = first
+        if last:
+            params["last_name"] = last
     if city:
         params["city"] = city
 
@@ -187,10 +200,14 @@ def search_npi(
                 if specialty.lower() not in specialty_name.lower():
                     continue
 
+            result_name = basic.get("organization_name", "").strip()
+            if provider_type == "doctor":
+                result_name = f"{basic.get('first_name', '')} {basic.get('last_name', '')}".strip()
+
             results.append(
                 NPIResult(
                     npi=r.get("number", ""),
-                    name=f"{basic.get('first_name', '')} {basic.get('last_name', '')}".strip(),
+                    name=result_name,
                     credential=basic.get("credential", ""),
                     specialty=specialty_name,
                     address=practice_addr.get("address_1", ""),
@@ -208,8 +225,42 @@ def search_npi(
         return []
 
 
+def resolve_provider_npi(
+    name: str,
+    state: str = "TX",
+    city: Optional[str] = None,
+    specialty: Optional[str] = None,
+    limit: int = 10,
+    provider_type: str = "auto",
+) -> tuple[list[NPIResult], str]:
+    provider_type = normalize_provider_type(provider_type)
+
+    if provider_type in {"doctor", "facility"}:
+        results = search_npi(
+            name, state=state, city=city, specialty=specialty,
+            limit=limit, provider_type=provider_type
+        )
+        return results, provider_type if results else "not_found"
+
+    doctor_results = search_npi(
+        name, state=state, city=city, specialty=specialty,
+        limit=limit, provider_type="doctor"
+    )
+    if doctor_results:
+        return doctor_results, "doctor"
+
+    facility_results = search_npi(
+        name, state=state, city=city, specialty=specialty,
+        limit=limit, provider_type="facility"
+    )
+    if facility_results:
+        return facility_results, "facility"
+
+    return [], "not_found"
+
+
 def generate_bcbstx_urls(name: str, lat: float, lon: float, radius: int) -> dict:
-    """Generate BCBSTX provider finder URLs for a doctor."""
+    """Generate BCBSTX provider finder URLs for a provider."""
     urls = {}
     for key, config in BCBSTX_SEARCH_URLS.items():
         urls[key] = {
@@ -224,15 +275,18 @@ def generate_bcbstx_urls(name: str, lat: float, lon: float, radius: int) -> dict
 def check_doctor(
     doctor: Doctor, lat: float, lon: float, radius: int, city: Optional[str] = None
 ) -> dict:
-    """Check a doctor in NPI Registry and generate BCBSTX links."""
-    npi_results = search_npi(
-        doctor.name, state="TX", city=city, specialty=doctor.specialty
+    """Check a provider in NPI Registry and generate BCBSTX links."""
+    npi_results, resolved_provider_type = resolve_provider_npi(
+        doctor.name, state="TX", city=city, specialty=doctor.specialty,
+        provider_type=doctor.provider_type
     )
 
     bcbstx_urls = generate_bcbstx_urls(doctor.name, lat, lon, radius)
 
     return {
+        "provider": doctor.name,
         "doctor": doctor.name,
+        "provider_type": resolved_provider_type,
         "specialty_filter": doctor.specialty,
         "npi_found": len(npi_results) > 0,
         "npi_count": len(npi_results),
@@ -254,12 +308,13 @@ def check_doctor(
 def print_results(results: list[dict], show_urls: bool = True):
     """Print results in a readable format."""
     print("\n" + "=" * 80)
-    print("DOCTOR SEARCH RESULTS")
+    print("PROVIDER SEARCH RESULTS")
     print("=" * 80)
 
     for r in results:
         print(f"\n{'─' * 80}")
         print(f"SEARCH: {r['doctor']}", end="")
+        print(f" ({r['provider_type']})", end="")
         if r["specialty_filter"]:
             print(f" [{r['specialty_filter']}]", end="")
         print()
@@ -268,7 +323,8 @@ def print_results(results: list[dict], show_urls: bool = True):
         if r["npi_found"]:
             print(f"\n✅ Found {r['npi_count']} match(es) in NPI Registry:\n")
             for i, npi in enumerate(r["npi_results"], 1):
-                print(f"  {i}. {npi['name']}, {npi['credential']}")
+                credential = f", {npi['credential']}" if npi["credential"] else ""
+                print(f"  {i}. {npi['name']}{credential}")
                 print(f"     NPI: {npi['npi']}")
                 print(f"     Specialty: {npi['specialty']}")
                 print(f"     Location: {npi['location']}")
@@ -298,13 +354,14 @@ def print_results(results: list[dict], show_urls: bool = True):
     if not_found:
         print(f"    ❌ Not found: {not_found}")
 
-    print(f"\n  Note: NPI Registry confirms doctors are licensed in Texas.")
+    print(f"\n  Note: NPI Registry confirms providers have an NPI in Texas.")
     print(f"  Use the BCBSTX links above to verify network status.")
     print()
 
 
-def parse_doctors(doctor_input: str) -> list[Doctor]:
-    """Parse doctor input string."""
+def parse_doctors(doctor_input: str, provider_type: str = "auto") -> list[Doctor]:
+    """Parse provider input string."""
+    provider_type = normalize_provider_type(provider_type)
     doctors = []
     for entry in doctor_input.split(","):
         entry = entry.strip()
@@ -313,19 +370,19 @@ def parse_doctors(doctor_input: str) -> list[Doctor]:
         if "(" in entry and ")" in entry:
             name_part = entry[: entry.index("(")].strip()
             specialty = entry[entry.index("(") + 1 : entry.index(")")].strip()
-            doctors.append(Doctor(name=name_part, specialty=specialty))
+            doctors.append(Doctor(name=name_part, specialty=specialty, provider_type=provider_type))
         else:
-            doctors.append(Doctor(name=entry))
+            doctors.append(Doctor(name=entry, provider_type=provider_type))
     return doctors
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Check doctor availability using NPI Registry and generate BCBSTX search links",
+        description="Check provider availability using NPI Registry and generate BCBSTX search links",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --doctors "John Smith, Jane Doe" --location "Dallas"
+  %(prog)s --providers "John Smith, Baylor University Medical Center" --location "Dallas"
   %(prog)s --doctors "John Smith (Cardiology)" --location 75201
   %(prog)s --file doctors.txt --location "Austin" --city "Austin"
   %(prog)s --doctors "Smith" --coords "32.7767,-96.7970" --json
@@ -334,12 +391,20 @@ Examples:
 
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument(
-        "--doctors", "-d",
-        help="Comma-separated list of doctor names. Use (Specialty) for filtering.",
+        "--doctors", "-d", "--providers", "-p",
+        dest="doctors",
+        help="Comma-separated list of provider names. Use (Specialty/Type) for filtering.",
     )
     input_group.add_argument(
         "--file", "-f",
-        help="File with one doctor per line",
+        help="File with one provider per line",
+    )
+
+    parser.add_argument(
+        "--provider-type",
+        choices=["auto", "doctor", "facility"],
+        default="auto",
+        help="Resolve each provider automatically, or force doctors as NPI-1 / facilities as NPI-2 (default: auto)",
     )
 
     parser.add_argument(
@@ -373,15 +438,15 @@ Examples:
 
     args = parser.parse_args()
 
-    # Parse doctors
+    # Parse providers
     if args.doctors:
-        doctors = parse_doctors(args.doctors)
+        doctors = parse_doctors(args.doctors, provider_type=args.provider_type)
     else:
         with open(args.file, "r") as f:
-            doctors = parse_doctors(f.read().replace("\n", ","))
+            doctors = parse_doctors(f.read().replace("\n", ","), provider_type=args.provider_type)
 
     if not doctors:
-        print("Error: No doctors specified", file=sys.stderr)
+        print("Error: No providers specified", file=sys.stderr)
         sys.exit(1)
 
     # Get coordinates
@@ -403,9 +468,9 @@ Examples:
 
     if not args.json:
         print(f"Location: {lat:.4f}, {lon:.4f}")
-        print(f"Checking {len(doctors)} doctor(s)...")
+        print(f"Checking {len(doctors)} provider(s)...")
 
-    # Check each doctor
+    # Check each provider
     results = []
     for doctor in doctors:
         if not args.json:

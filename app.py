@@ -1,27 +1,61 @@
 #!/usr/bin/env python3
 """
-Web interface for Doctor Network Checker
+Web interface for Provider Network Checker
 """
+
+from collections import Counter
+from datetime import datetime, timezone
+from functools import lru_cache
+import hashlib
+import json
+import os
+import re
+import threading
 
 from flask import Flask, render_template_string, request, jsonify
 import requests
 from urllib.parse import quote
-from dataclasses import dataclass
-from typing import Optional
 
 app = Flask(__name__)
 
 # NPI Registry API
 NPI_API = "https://npiregistry.cms.hhs.gov/api/"
+CMS_MARKETPLACE_API = "https://marketplace.api.healthcare.gov/api/v1"
+CMS_MARKETPLACE_API_KEY = os.environ.get(
+    "CMS_MARKETPLACE_API_KEY",
+    "d687412e7b53146b2631dc01974ad0a4",
+)
+NETWORK_LOOKUP_TIMEOUT = 8
+SOURCE_FRESHNESS_TIMEOUT = 5
+SOURCE_FRESHNESS_TTL_SECONDS = 12 * 60 * 60
+SOURCE_FRESHNESS_CACHE_PATH = os.environ.get(
+    "SOURCE_FRESHNESS_CACHE_PATH",
+    os.path.join(os.path.expanduser("~"), ".cache", "sommer-computer", "source-freshness.json"),
+)
+CMS_PUF_PAGE_URL = "https://www.cms.gov/marketplace/resources/data/public-use-files"
+CMS_PUF_LABELS = (
+    "Plan Attributes PUF",
+    "Service Area PUF",
+    "Network PUF",
+    "Machine-readable URL PUF",
+)
+SOURCE_REFRESH_STATE = {"in_progress": False}
+SOURCE_REFRESH_LOCK = threading.Lock()
 
 # BCBSTX Provider Finder URL templates
 BCBSTX_SEARCH_URLS = {
     "blue_advantage_hmo": {
         "name": "Blue Advantage HMO",
+        "marketplace_issuer": "Blue Cross and Blue Shield of Texas",
+        "marketplace_plan_name_contains": ["blue advantage", "hmo"],
+        "marketplace_network_url_contains": "tx-blueadvantage-retail",
         "url": "https://my.providerfinderonline.com/search/name/{query}?ci=tx-blueadvantage-retail&network_id=1000128&geo_location={lat},{lon}&locale=en&corp_code=TX&radius={radius}",
     },
     "my_blue_health": {
         "name": "My Blue Health",
+        "marketplace_issuer": "Blue Cross and Blue Shield of Texas",
+        "marketplace_plan_name_contains": ["myblue health"],
+        "marketplace_network_url_contains": "tx-myblue-health",
         "url": "https://my.providerfinderonline.com/search/name/{query}?ci=tx-myblue-health&network_id=240000127&geo_location={lat},{lon}&locale=en&corp_code=TX&radius={radius}",
     },
 }
@@ -30,14 +64,29 @@ BCBSTX_SEARCH_URLS = {
 UHC_SEARCH_URLS = {
     "tx_individual_exchange": {
         "name": "UHC TX Individual Exchange",
+        "marketplace_issuer": "UnitedHealthcare",
+        "marketplace_network_url_contains": "xtxdocfindg2026",
+        "network_code": "908",
+        "configuration": "uhc",
+        "plan_year": 2026,
         "url": "https://connect.werally.com/guest/eyJwbGFuTmFtZSI6IlRYIEluZGl2aWR1YWwgRXhjaGFuZ2UgQmVuZWZpdCBQbGFuIiwiZGVsc3lzIjoiOTA4IiwiY292ZXJhZ2VUeXBlIjoibWVkaWNhbCIsInBhcnRuZXJJZCI6InVoYyIsImxhbmd1YWdlIjoiZW4iLCJzaG93Q29zdHMiOnRydWUsImZpcHNDb2RlIjoiNDgifQMQFY_1U6GK3dWzJO0xysxZD0H-Ei_AJ0Wm_n0zlgcUI?planYear=2026",
     },
     "tx_kelsey_seybold": {
         "name": "UHC TX Kelsey-Seybold",
+        "marketplace_issuer": "UnitedHealthcare",
+        "marketplace_network_url_contains": "xtxdocfindks2026",
+        "network_code": "933",
+        "configuration": "uhc",
+        "plan_year": 2026,
         "url": "https://connect.werally.com/guest/eyJwbGFuTmFtZSI6IlRYIEtlbHNleS1TZXlib2xkIEluZGl2aWR1YWwgRXhjaGFuZ2UgQmVuZWZpdCBQbGFuIiwiZGVsc3lzIjoiOTMzIiwiY292ZXJhZ2VUeXBlIjoibWVkaWNhbCIsInBhcnRuZXJJZCI6InVoYyIsImxhbmd1YWdlIjoiZW4iLCJzaG93Q29zdHMiOnRydWUsImZpcHNDb2RlIjoiNDgifQXmvT5Dh8azZlM00ptmfLp0BrlP0yAn-7TQUdErUzIbs?planYear=2026",
     },
     "tx_sanitas_anchor": {
         "name": "UHC TX Sanitas Anchor",
+        "marketplace_issuer": "UnitedHealthcare",
+        "marketplace_network_url_contains": "xtxdocfindsn2026",
+        "network_code": "946",
+        "configuration": "uhc.exchange",
+        "plan_year": 2026,
         "url": "https://connect.werally.com/guest/eyJwbGFuTmFtZSI6IlRYIFNhbml0YXMgQW5jaG9yIEluZGl2aWR1YWwgRXhjaGFuZ2UgQmVuZWZpdCIsImRlbHN5cyI6Ijk0NiIsImNvdmVyYWdlVHlwZSI6Im1lZGljYWwiLCJwYXJ0bmVySWQiOiJ1aGMuZXhjaGFuZ2UiLCJsYW5ndWFnZSI6ImVuIiwic2hvd0Nvc3RzIjp0cnVlLCJmaXBzQ29kZSI6IjQ4In0B_6Q323L9wHzkAf22cjU43lZYKLoyfNzTYw8nrMBL04?planYear=2026",
     },
 }
@@ -58,13 +107,519 @@ TEXAS_LOCATIONS = {
     "richardson": (32.9483, -96.7299),
 }
 
+TEXAS_MARKETPLACE_PLACES = {
+    "dallas": {"zipcode": "75201", "countyfips": "48113", "state": "TX"},
+    "fort worth": {"zipcode": "76102", "countyfips": "48439", "state": "TX"},
+    "houston": {"zipcode": "77030", "countyfips": "48201", "state": "TX"},
+    "austin": {"zipcode": "78701", "countyfips": "48453", "state": "TX"},
+    "san antonio": {"zipcode": "78205", "countyfips": "48029", "state": "TX"},
+    "plano": {"zipcode": "75024", "countyfips": "48085", "state": "TX"},
+    "arlington": {"zipcode": "76010", "countyfips": "48439", "state": "TX"},
+    "irving": {"zipcode": "75039", "countyfips": "48113", "state": "TX"},
+    "frisco": {"zipcode": "75034", "countyfips": "48085", "state": "TX"},
+    "mckinney": {"zipcode": "75070", "countyfips": "48085", "state": "TX"},
+    "denton": {"zipcode": "76201", "countyfips": "48121", "state": "TX"},
+    "richardson": {"zipcode": "75080", "countyfips": "48113", "state": "TX"},
+}
+
+SOURCE_CHECK_DATE = "2026-05-13"
+PROVIDER_DIRECTORY = "Provider directory"
+FORMULARY = "Formulary"
+HTTP_200_HTML = "HTTP 200 text/html"
+HTTP_200_PDF = "HTTP 200 application/pdf"
+CMS_PRIMARY_ROLE = "Carrier cross-check; CMS Marketplace remains primary when plan IDs match."
+FORMULARY_FALLBACK_ROLE = "Formulary evidence and fallback when CMS RxCUI output is suspect."
+UNMAPPED_CARRIER_ROLE = "Carrier source to map next; CMS Marketplace structured matching not yet configured."
+BEHAVIORAL_COLUMN_NOTE = "Need to decide whether behavioral networks get separate columns or directory-only links."
+FORMULARY_DRIFT_NOTE = "2027 formulary URL may change."
+
+
+def source_plain_english(name, kind, role):
+    if kind == FORMULARY:
+        return f"This is the carrier formulary for {name}. Use it to manually confirm drug coverage when CMS RxCUI data looks unclear."
+    if role == CMS_PRIMARY_ROLE:
+        return f"This is the carrier directory for {name}. Use it as a manual cross-check when CMS says a provider is likely in network."
+    if "Behavioral" in role:
+        return f"This is the behavioral-health directory for {name}. It is not part of the automated CMS lookup yet."
+    return f"This is the carrier directory for {name}. Use it for manual confirmation until this carrier is mapped into structured lookup."
+
+
+def carrier_source(name, kind, identifier, url, validation, role, note, year="2026"):
+    return {
+        "name": name,
+        "kind": kind,
+        "year": year,
+        "identifier": identifier,
+        "url": url,
+        "checked_on": SOURCE_CHECK_DATE,
+        "validation": validation,
+        "description": source_plain_english(name, kind, role),
+        "role": role,
+        "note": note,
+    }
+
+
+def provider_source(name, identifier, url, role, note):
+    return carrier_source(name, PROVIDER_DIRECTORY, identifier, url, HTTP_200_HTML, role, note)
+
+
+def formulary_source(name, identifier, url, validation=HTTP_200_PDF, note=FORMULARY_DRIFT_NOTE):
+    return carrier_source(name, FORMULARY, identifier, url, validation, FORMULARY_FALLBACK_ROLE, note)
+
+
+CARRIER_SOURCE_GROUPS = [
+    {
+        "carrier": "BCBS",
+        "sources": [
+            provider_source(
+                "Blue Advantage",
+                "network_id=1000128; ci=tx-blueadvantage-retail",
+                "https://my.providerfinderonline.com/?ci=tx-blueadvantage-retail&corp_code=TX&network_id=1000128&geo_location=32.753521,-97.331527&locale=en",
+                CMS_PRIMARY_ROLE,
+                "Directory links depend on coordinates; app-generated links should keep passing city coordinates.",
+            ),
+            provider_source(
+                "MyBlue Health",
+                "network_id=240000127; ci=tx-myblue-health",
+                "https://my.providerfinderonline.com/?ci=tx-myblue-health&corp_code=TX&network_id=240000127&geo_location=32.753521,-97.331527&locale=en",
+                CMS_PRIMARY_ROLE,
+                "Directory links depend on coordinates; app-generated links should keep passing city coordinates.",
+            ),
+            formulary_source(
+                "4-Tier",
+                "2026_TX_4T_HIM.pdf",
+                "https://www.myprime.com/content/dam/prime/memberportal/WebDocs/2026/Formularies/HIM/2026_TX_4T_HIM.pdf",
+            ),
+            formulary_source(
+                "6-Tier",
+                "2026_TX_6T_HIM.pdf",
+                "https://www.myprime.com/content/dam/prime/memberportal/WebDocs/2026/Formularies/HIM/2026_TX_6T_HIM.pdf",
+            ),
+        ],
+        "open_questions": [
+            "Confirm 2027 BCBS formulary URLs when released.",
+            "Keep confirming coordinate-dependent provider links for each supported city.",
+        ],
+    },
+    {
+        "carrier": "UHC",
+        "sources": [
+            provider_source(
+                "Individual Exchange HMO",
+                "IFP medical plan-selection landing",
+                "https://findcare.guest.uhc.com/guest-plan-selection/plan-selection?planSelectionLob=IFP&coverageType=M&chipValue=All",
+                "Carrier cross-check; CMS Marketplace network_url fragments drive automated status.",
+                "Landing page may require user plan/location choices before a specific provider search.",
+            ),
+            provider_source(
+                "Individual Exchange Behavioral Health",
+                "behavioralProvider/root",
+                "https://connect.werally.com/behavioralProvider/root",
+                "Behavioral-health carrier cross-check; not yet an automated CMS status column.",
+                BEHAVIORAL_COLUMN_NOTE,
+            ),
+            provider_source(
+                "Sanitas",
+                "San Antonio only; IFP medical plan-selection landing",
+                "https://findcare.guest.uhc.com/guest-plan-selection/plan-selection?planSelectionLob=IFP&coverageType=M&chipValue=All",
+                "Carrier cross-check for San Antonio only; CMS Marketplace not-offered logic stays location-specific.",
+                "Only expected in San Antonio markets.",
+            ),
+            provider_source(
+                "Sanitas Behavioral Health",
+                "San Antonio only; behavioralProvider/root",
+                "https://connect.werally.com/behavioralProvider/root",
+                "Behavioral-health carrier cross-check for San Antonio only.",
+                BEHAVIORAL_COLUMN_NOTE,
+            ),
+            provider_source(
+                "Kelsey-Seybold",
+                "Houston only; IFP medical plan-selection landing",
+                "https://findcare.guest.uhc.com/guest-plan-selection/plan-selection?planSelectionLob=IFP&coverageType=M&chipValue=All",
+                "Carrier cross-check for Houston only; CMS Marketplace not-offered logic stays location-specific.",
+                "Only expected in Houston markets.",
+            ),
+            provider_source(
+                "Kelsey-Seybold Behavioral Health",
+                "Houston only; behavioralProvider/root",
+                "https://connect.werally.com/behavioralProvider/root",
+                "Behavioral-health carrier cross-check for Houston only.",
+                BEHAVIORAL_COLUMN_NOTE,
+            ),
+            formulary_source(
+                "Individual Exchange HMO",
+                "GPX526TX",
+                "https://welcome.optumrx.com/rxexternal/external-prescription-drug-list?type=ClientFormulary&var=GPX526TX&infoid=GPX526TX&page=insert&par=",
+                validation=HTTP_200_HTML,
+                note="2027 formulary URL or var code may change.",
+            ),
+        ],
+        "open_questions": [
+            "Decide whether UHC behavioral directories should become separate lookup columns.",
+            "Confirm 2027 OptumRx formulary code when released.",
+        ],
+    },
+    {
+        "carrier": "Oscar",
+        "sources": [
+            provider_source(
+                "Individual Texas EPO",
+                "networkId=064",
+                "https://www.hioscar.com/search/?networkId=064&year=2026",
+                UNMAPPED_CARRIER_ROLE,
+                "Need to determine whether Oscar network IDs can be linked to CMS plan/network data.",
+            ),
+            provider_source(
+                "Individual Texas HMO",
+                "networkId=059",
+                "https://www.hioscar.com/search/?networkId=059&year=2026",
+                UNMAPPED_CARRIER_ROLE,
+                "Need to determine whether Oscar network IDs can be linked to CMS plan/network data.",
+            ),
+            formulary_source(
+                "4-Tier",
+                "Oscar_4T_TX_STND_Member_Doc__May_2026__as_of_04232026.pdf",
+                "https://assets.ctfassets.net/plyq12u1bv8a/5W9SoIT8xdqyUOubCEkXPu/15537604594f76ddfdbb7afb2c6d7fdf/Oscar_4T_TX_STND_Member_Doc__May_2026__as_of_04232026.pdf",
+            ),
+            formulary_source(
+                "6-Tier",
+                "Oscar_6T_TX_STND_Member_Doc__May_2026__as_of_04232026.pdf",
+                "https://assets.ctfassets.net/plyq12u1bv8a/1kKyM41GUUlVBx4F9I2EPC/caf94c63da03c324f32b5270cca8ab87/Oscar_6T_TX_STND_Member_Doc__May_2026__as_of_04232026.pdf",
+            ),
+        ],
+        "open_questions": [
+            "Map Oscar networkId values to CMS issuer/plan/network identifiers before automating status.",
+            "Confirm 2027 Oscar formulary URLs when released.",
+        ],
+    },
+    {
+        "carrier": "Imperial",
+        "sources": [
+            provider_source(
+                "Exchange HMO",
+                "texas/hmo-exchange",
+                "https://exchange.imperialhealthplan.com/texas/hmo-exchange/online-provider-directory/",
+                UNMAPPED_CARRIER_ROLE,
+                "Need to determine whether this can be queried or only opened for manual confirmation.",
+            ),
+        ],
+        "open_questions": [
+            "Identify CMS issuer/plan/network mapping for Imperial Exchange HMO.",
+            "Determine whether the directory supports query URLs or only manual search.",
+            "Determine which non-CMS carrier links can be queried directly versus opened for manual confirmation.",
+        ],
+    },
+    {
+        "carrier": "Community Health Choice",
+        "sources": [
+            provider_source(
+                "Premier Gold",
+                "Houston only; find-a-provider",
+                "https://memberaccount.communityhealthchoice.org/s/find-a-provider?language=en_US",
+                UNMAPPED_CARRIER_ROLE,
+                "Directory requires provider/facility type and area before search.",
+            ),
+            formulary_source(
+                "Premier Gold",
+                "formulary-premier-2026.pdf",
+                "https://www.communityhealthchoice.org/wp-content/uploads/2025/05/formulary-premier-2026.pdf",
+            ),
+        ],
+        "open_questions": [
+            "Handle the required provider/facility type and area input before automating Community searches.",
+            "Confirm 2027 Premier Gold formulary URL when released.",
+        ],
+    },
+]
+
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def parse_utc_iso(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def flatten_carrier_sources(source_groups=None):
+    flattened = []
+    for group in source_groups or CARRIER_SOURCE_GROUPS:
+        carrier = group["carrier"]
+        for source in group.get("sources", []):
+            source_id = "::".join([
+                carrier,
+                source.get("kind", ""),
+                source.get("name", ""),
+                source.get("identifier", ""),
+            ])
+            flattened.append({
+                **source,
+                "id": source_id,
+                "carrier": carrier,
+            })
+    return flattened
+
+
+def load_source_freshness_cache():
+    try:
+        with open(SOURCE_FRESHNESS_CACHE_PATH, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_source_freshness_cache(cache):
+    directory = os.path.dirname(SOURCE_FRESHNESS_CACHE_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(SOURCE_FRESHNESS_CACHE_PATH, "w", encoding="utf-8") as handle:
+        json.dump(cache, handle, indent=2, sort_keys=True)
+
+
+def extract_cms_puf_updates(html):
+    updates = {}
+    for label in CMS_PUF_LABELS:
+        match = re.search(
+            rf"{re.escape(label)}.*?Updated\s+([A-Za-z]+\s+\d{{1,2}},\s+\d{{4}})",
+            html,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            updates[label] = match.group(1)
+    return updates
+
+
+def response_header(response, name):
+    return getattr(response, "headers", {}).get(name, "")
+
+
+def response_ok(response):
+    return 200 <= getattr(response, "status_code", 0) < 400
+
+
+def response_metadata(response, method, content_hash=""):
+    return {
+        "method": method,
+        "status_code": getattr(response, "status_code", 0),
+        "ok": response_ok(response),
+        "url": getattr(response, "url", ""),
+        "etag": response_header(response, "ETag"),
+        "last_modified": response_header(response, "Last-Modified"),
+        "content_length": response_header(response, "Content-Length"),
+        "content_type": response_header(response, "Content-Type"),
+        "content_hash": content_hash,
+    }
+
+
+def metadata_changed(previous, current):
+    for key in ("etag", "last_modified", "content_length", "content_hash"):
+        old_value = previous.get(key)
+        new_value = current.get(key)
+        if old_value and new_value and old_value != new_value:
+            return True
+    return False
+
+
+def check_url_metadata(url):
+    try:
+        response = requests.head(
+            url,
+            allow_redirects=True,
+            timeout=SOURCE_FRESHNESS_TIMEOUT,
+        )
+        if response_ok(response):
+            metadata = response_metadata(response, "HEAD")
+            if metadata["etag"] or metadata["last_modified"] or metadata["content_length"]:
+                return metadata
+    except requests.RequestException:
+        pass
+
+    try:
+        response = requests.get(
+            url,
+            allow_redirects=True,
+            stream=True,
+            timeout=SOURCE_FRESHNESS_TIMEOUT,
+        )
+        hasher = hashlib.sha256()
+        bytes_read = 0
+        for chunk in response.iter_content(chunk_size=8192):
+            if not chunk:
+                continue
+            remaining = 128 * 1024 - bytes_read
+            if remaining <= 0:
+                break
+            sample = chunk[:remaining]
+            hasher.update(sample)
+            bytes_read += len(sample)
+        return response_metadata(response, "GET", content_hash=hasher.hexdigest())
+    except requests.RequestException as error:
+        return {
+            "method": "GET",
+            "status_code": 0,
+            "ok": False,
+            "url": url,
+            "etag": "",
+            "last_modified": "",
+            "content_length": "",
+            "content_type": "",
+            "content_hash": "",
+            "error": str(error),
+        }
+
+
+def source_status_from_metadata(previous, metadata):
+    if not metadata.get("ok"):
+        return "missing"
+    if metadata_changed(previous, metadata):
+        return "changed"
+    if not (metadata.get("etag") or metadata.get("last_modified") or metadata.get("content_length") or metadata.get("content_hash")):
+        return "suspect"
+    return "ok"
+
+
+def check_cms_puf_page(previous_cache):
+    previous_puf = previous_cache.get("puf", {})
+    try:
+        response = requests.get(CMS_PUF_PAGE_URL, timeout=SOURCE_FRESHNESS_TIMEOUT)
+        response.raise_for_status()
+        html = response.text
+        page_hash = hashlib.sha256(html.encode("utf-8")).hexdigest()
+        updates = extract_cms_puf_updates(html)
+        puf = {
+            "url": CMS_PUF_PAGE_URL,
+            "status": "ok",
+            "checked_at": utc_now_iso(),
+            "content_hash": page_hash,
+            "updates": updates,
+        }
+        if previous_puf.get("content_hash") and previous_puf["content_hash"] != page_hash:
+            puf["status"] = "changed"
+        return puf
+    except (requests.RequestException, ValueError) as error:
+        return {
+            "url": CMS_PUF_PAGE_URL,
+            "status": "suspect",
+            "checked_at": utc_now_iso(),
+            "content_hash": previous_puf.get("content_hash", ""),
+            "updates": previous_puf.get("updates", {}),
+            "error": str(error),
+        }
+
+
+def check_source_freshness(previous_cache=None):
+    previous_cache = previous_cache if previous_cache is not None else load_source_freshness_cache()
+    previous_sources = {
+        source.get("id"): source
+        for source in previous_cache.get("sources", [])
+    }
+    checked_at = utc_now_iso()
+    source_entries = []
+
+    for source in flatten_carrier_sources():
+        metadata = check_url_metadata(source["url"])
+        previous = previous_sources.get(source["id"], {})
+        status = source_status_from_metadata(previous, metadata)
+        source_entries.append({
+            **source,
+            **metadata,
+            "status": status,
+            "checked_at": checked_at,
+        })
+
+    cache = {
+        "last_checked": checked_at,
+        "ttl_seconds": SOURCE_FRESHNESS_TTL_SECONDS,
+        "puf": check_cms_puf_page(previous_cache),
+        "sources": source_entries,
+    }
+    save_source_freshness_cache(cache)
+    return cache
+
+
+def source_freshness_age_seconds(cache):
+    checked_at = parse_utc_iso(cache.get("last_checked"))
+    if not checked_at:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - checked_at).total_seconds()))
+
+
+def source_freshness_summary(cache=None):
+    cache = cache if cache is not None else load_source_freshness_cache()
+    if not cache:
+        return {
+            "status": "checking" if SOURCE_REFRESH_STATE["in_progress"] else "never_checked",
+            "last_checked": "",
+            "age_seconds": None,
+            "ttl_seconds": SOURCE_FRESHNESS_TTL_SECONDS,
+            "in_progress": SOURCE_REFRESH_STATE["in_progress"],
+            "counts": {"total": len(flatten_carrier_sources()), "ok": 0, "changed": 0, "suspect": 0, "missing": 0},
+            "puf": {},
+            "sources": [],
+        }
+
+    counts = Counter(source.get("status", "suspect") for source in cache.get("sources", []))
+    age_seconds = source_freshness_age_seconds(cache)
+    stale = age_seconds is None or age_seconds > cache.get("ttl_seconds", SOURCE_FRESHNESS_TTL_SECONDS)
+    if SOURCE_REFRESH_STATE["in_progress"]:
+        status = "checking"
+    elif stale:
+        status = "stale"
+    elif counts.get("changed") or cache.get("puf", {}).get("status") == "changed":
+        status = "changed"
+    elif counts.get("suspect") or counts.get("missing") or cache.get("puf", {}).get("status") == "suspect":
+        status = "suspect"
+    else:
+        status = "fresh"
+
+    return {
+        "status": status,
+        "last_checked": cache.get("last_checked", ""),
+        "age_seconds": age_seconds,
+        "ttl_seconds": cache.get("ttl_seconds", SOURCE_FRESHNESS_TTL_SECONDS),
+        "in_progress": SOURCE_REFRESH_STATE["in_progress"],
+        "counts": {
+            "total": len(cache.get("sources", [])),
+            "ok": counts.get("ok", 0),
+            "changed": counts.get("changed", 0),
+            "suspect": counts.get("suspect", 0),
+            "missing": counts.get("missing", 0),
+        },
+        "puf": cache.get("puf", {}),
+        "sources": cache.get("sources", []),
+    }
+
+
+def run_source_refresh():
+    try:
+        check_source_freshness()
+    finally:
+        with SOURCE_REFRESH_LOCK:
+            SOURCE_REFRESH_STATE["in_progress"] = False
+
+
+def start_source_refresh():
+    with SOURCE_REFRESH_LOCK:
+        if SOURCE_REFRESH_STATE["in_progress"]:
+            return False
+        SOURCE_REFRESH_STATE["in_progress"] = True
+    thread = threading.Thread(target=run_source_refresh, daemon=True)
+    thread.start()
+    return True
+
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Doctor Network Checker</title>
+    <title>Provider Network Checker</title>
     <style>
         * {
             box-sizing: border-box;
@@ -137,6 +692,48 @@ HTML_TEMPLATE = """
         button:disabled {
             background: #93c5fd;
             cursor: not-allowed;
+        }
+        .demo-scenarios {
+            border-top: 1px solid #e5e7eb;
+            margin-top: 4px;
+            padding-top: 16px;
+        }
+        .demo-title {
+            color: #374151;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .demo-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .demo-random,
+        .demo-link {
+            align-items: center;
+            border-radius: 999px;
+            display: inline-flex;
+            font-size: 13px;
+            font-weight: 600;
+            min-height: 36px;
+            padding: 8px 12px;
+            text-decoration: none;
+            width: auto;
+        }
+        .demo-random {
+            background: #111827;
+            color: white;
+        }
+        .demo-random:hover {
+            background: #374151;
+        }
+        .demo-link {
+            background: #f3f4f6;
+            color: #1f2937;
+        }
+        .demo-link:hover {
+            background: #e5e7eb;
         }
         .results {
             background: white;
@@ -220,6 +817,423 @@ HTML_TEMPLATE = """
         .network-link.uhc:hover {
             background: #fde68a;
         }
+        .network-matrix {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        .network-matrix-wrap {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        .network-matrix-scroll {
+            overflow-x: auto;
+        }
+        .network-matrix-title {
+            padding: 14px 20px 3px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        .network-matrix-note {
+            padding: 0 20px 10px;
+            color: #6b7280;
+            font-size: 12px;
+        }
+        .network-matrix th,
+        .network-matrix td {
+            border-top: 1px solid #e5e7eb;
+            padding: 9px 8px;
+            text-align: center;
+            vertical-align: middle;
+        }
+        .network-matrix th {
+            background: #f8fafc;
+            color: #374151;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .network-matrix th:first-child,
+        .network-matrix td:first-child {
+            min-width: 260px;
+            text-align: left;
+            width: 260px;
+        }
+        .network-matrix th:not(:first-child),
+        .network-matrix td:not(:first-child) {
+            border-left: 1px solid #eef2f7;
+            min-width: 132px;
+        }
+        .network-matrix tbody tr.lookup-row:hover td:not(:first-child) {
+            background: #f8fafc;
+        }
+        .network-matrix [data-column-index]:not([data-column-index="0"]).column-hover {
+            background: #f0f9ff;
+        }
+        .network-matrix th[data-column-index].column-hover {
+            background: #e0f2fe;
+        }
+        .network-matrix td.network-cell:hover {
+            background: #eff6ff;
+            outline: 2px solid #93c5fd;
+            outline-offset: -2px;
+        }
+        .lookup-section-row td {
+            background: #f9fafb;
+            padding: 12px 20px;
+        }
+        .lookup-section-title {
+            color: #111827;
+            font-size: 13px;
+            font-weight: 750;
+            margin-bottom: 2px;
+        }
+        .lookup-section-copy {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .lookup-item-cell {
+            position: relative;
+        }
+        .lookup-item-content {
+            padding: 1px 24px 1px 0;
+            position: relative;
+        }
+        .lookup-item-heading-row {
+            align-items: flex-start;
+            display: flex;
+            gap: 8px;
+        }
+        .lookup-item-heading {
+            color: #1f2937;
+            font-size: 13px;
+            font-weight: 650;
+            line-height: 1.25;
+            min-width: 0;
+        }
+        .lookup-item-meta {
+            color: #6b7280;
+            font-size: 11px;
+            line-height: 1.35;
+            margin-top: 5px;
+            text-transform: none;
+        }
+        .network-provider {
+            color: #1f2937;
+            font-weight: 600;
+        }
+        .provider-tag {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .provider-tag.item-tag {
+            flex: 0 0 auto;
+            margin-left: auto;
+        }
+        .provider-tag.doctor {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+        .provider-tag.facility {
+            background: #ede9fe;
+            color: #6d28d9;
+        }
+        .provider-tag.rx {
+            background: #ccfbf1;
+            color: #0f766e;
+        }
+        .provider-tag.not-found {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .network-status {
+            align-items: center;
+            display: inline-flex;
+            gap: 4px;
+            justify-content: center;
+            min-width: 0;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        .network-status-icon {
+            flex: 0 0 auto;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .network-status.in {
+            background: #dcfce7;
+            color: #15803d;
+        }
+        .network-status.out,
+        .network-status.not-found,
+        .network-status.no-record,
+        .network-status.suspect {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+        .network-status.generic-covered {
+            background: #ccfbf1;
+            color: #0f766e;
+        }
+        .network-status.likely-in,
+        .network-status.likely-covered {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .network-status.partial-coverage {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .network-status.data-not-provided {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .network-status.lookup-error {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .network-status.not-offered,
+        .network-status.not-configured,
+        .network-status.no-result {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+        .network-status.unknown {
+            background: #f3f4f6;
+            color: #6b7280;
+        }
+        .network-status-detail {
+            color: #6b7280;
+            font-size: 10px;
+            line-height: 1.25;
+            margin-top: 4px;
+        }
+        .network-cell,
+        .info-tip {
+            position: relative;
+        }
+        .info-tip {
+            align-items: center;
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            border-radius: 999px;
+            color: #4338ca;
+            cursor: help;
+            display: inline-flex;
+            flex: 0 0 auto;
+            font-size: 10px;
+            font-weight: 800;
+            height: 15px;
+            justify-content: center;
+            line-height: 1;
+            text-transform: none;
+            width: 15px;
+        }
+        .info-tip.item-info {
+            position: absolute;
+            right: 0;
+            top: 0;
+        }
+        [data-tooltip]:hover::after,
+        [data-tooltip]:focus::after {
+            background: #111827;
+            border-radius: 6px;
+            bottom: calc(100% + 8px);
+            color: white;
+            content: attr(data-tooltip);
+            font-size: 11px;
+            font-weight: 500;
+            left: 50%;
+            line-height: 1.35;
+            max-width: 320px;
+            min-width: 220px;
+            padding: 8px 10px;
+            pointer-events: none;
+            position: absolute;
+            text-align: left;
+            text-transform: none;
+            transform: translateX(-50%);
+            white-space: normal;
+            z-index: 20;
+        }
+        .info-tip[data-tooltip]:hover::after,
+        .info-tip[data-tooltip]:focus::after {
+            bottom: calc(100% + 6px);
+            left: 0;
+            transform: none;
+        }
+        .confidence-legend {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            margin-bottom: 24px;
+            padding: 16px 20px;
+        }
+        .legend-item {
+            align-items: flex-start;
+            display: flex;
+            gap: 10px;
+        }
+        .legend-swatch {
+            border-radius: 999px;
+            flex: 0 0 12px;
+            height: 12px;
+            margin-top: 4px;
+            width: 12px;
+        }
+        .legend-swatch.verified {
+            background: #22c55e;
+        }
+        .legend-swatch.likely {
+            background: #86efac;
+        }
+        .legend-swatch.partial {
+            background: #f59e0b;
+        }
+        .legend-swatch.suspect {
+            background: #ef4444;
+        }
+        .legend-swatch.not-offered {
+            background: #38bdf8;
+        }
+        .legend-title {
+            color: #1f2937;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+        .legend-copy {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .source-freshness {
+            align-items: center;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 16px;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding: 14px 18px;
+        }
+        .source-freshness-title {
+            color: #1f2937;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+        .source-freshness-copy {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .source-freshness-action {
+            align-items: center;
+            display: flex;
+            flex: 0 0 auto;
+            gap: 10px;
+        }
+        .source-freshness-button {
+            border-radius: 999px;
+            font-size: 13px;
+            min-height: 36px;
+            padding: 8px 12px;
+            width: auto;
+        }
+        .provider-details {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        .provider-details summary {
+            color: #1f2937;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            list-style-position: inside;
+            padding: 16px 20px;
+        }
+        .provider-details .results {
+            border-radius: 0;
+            box-shadow: none;
+            margin-bottom: 0;
+        }
+        .source-details {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        .source-details summary {
+            color: #1f2937;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            list-style-position: inside;
+            padding: 16px 20px;
+        }
+        .source-group {
+            border-top: 1px solid #e5e7eb;
+            padding: 16px 20px;
+        }
+        .source-carrier {
+            color: #1f2937;
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        .source-row {
+            border-top: 1px solid #f3f4f6;
+            padding: 10px 0;
+        }
+        .source-row:first-of-type {
+            border-top: 0;
+        }
+        .source-link {
+            color: #2563eb;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .source-link:hover {
+            text-decoration: underline;
+        }
+        .source-meta,
+        .source-description,
+        .source-note,
+        .source-question {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-top: 4px;
+        }
+        .source-description {
+            color: #374151;
+            font-weight: 600;
+        }
+        .source-question {
+            color: #92400e;
+        }
         .loading {
             text-align: center;
             padding: 40px;
@@ -297,20 +1311,36 @@ HTML_TEMPLATE = """
                 display: inline-flex;
                 align-items: center;
             }
+            .network-matrix th:first-child,
+            .network-matrix td:first-child {
+                min-width: 180px;
+                width: 180px;
+            }
+            .source-freshness {
+                align-items: flex-start;
+                flex-direction: column;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Doctor Network Checker</h1>
-    <p class="subtitle">Search for doctors in the NPI Registry and get insurance network links</p>
+    <h1>Provider Network Checker</h1>
+    <p class="subtitle">Search providers and prescriptions against public Marketplace network data</p>
 
     <div class="search-form">
         <form id="searchForm">
             <div class="form-group">
-                <label for="doctors">Doctor Name(s)</label>
+                <label for="doctors">Provider Name(s)</label>
                 <input type="text" id="doctors" name="doctors"
-                       placeholder="e.g., John Smith, Jane Doe" required>
-                <p class="hint">Separate multiple names with commas. Add (Specialty) to filter, e.g., "John Smith (Cardiology)"</p>
+                       placeholder="e.g., Dr. John Doe, Baylor Hospital, Kelsey Seybold Clinic">
+                <p class="hint">Separate names with commas. Doctors and facilities can be mixed; each row is tagged Doctor, Facility, or Not found.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="prescriptions">Prescription Name(s)</label>
+                <input type="text" id="prescriptions" name="prescriptions"
+                       placeholder="e.g., Ozempic, Levothyroxine, Ibuprofen">
+                <p class="hint">Separate multiple names with commas. Marketplace drug coverage is matched by RxCUI, so exact strength/form can matter.</p>
             </div>
 
             <div class="form-row">
@@ -349,22 +1379,68 @@ HTML_TEMPLATE = """
                        placeholder="e.g., Dallas (narrows NPI results)">
             </div>
 
-            <button type="submit" id="searchBtn">Search Doctors</button>
+            <button type="submit" id="searchBtn">Search</button>
+
+            <div class="demo-scenarios">
+                <div class="demo-title">Try a mixed provider + prescription sample</div>
+                <div class="demo-actions">
+                    <button type="button" class="demo-random" id="randomDemoBtn">Random mixed sample</button>
+                    <a href="?sample=dallas-specialty" class="demo-link" data-sample="dallas-specialty">Dallas doctor + hospital</a>
+                    <a href="?sample=houston-mix" class="demo-link" data-sample="houston-mix">Houston clinic + Rx</a>
+                    <a href="?sample=austin-mix" class="demo-link" data-sample="austin-mix">Austin facilities + Rx</a>
+                    <a href="?sample=san-antonio-wide" class="demo-link" data-sample="san-antonio-wide">San Antonio wide + Rx</a>
+                </div>
+            </div>
         </form>
     </div>
 
+    <div id="sourceStatus"></div>
     <div id="results"></div>
 
     <script>
-        document.getElementById('searchForm').addEventListener('submit', async function(e) {
+        const sampleScenarios = {
+            'dallas-specialty': {
+                providers: 'John Smith (Physician Assistant), Baylor University Medical Center (General Acute)',
+                prescriptions: 'Ibuprofen, Levothyroxine',
+                location: 'dallas',
+                radius: '25',
+                city: 'Dallas',
+            },
+            'houston-mix': {
+                providers: 'Maria Garcia, Houston Methodist Hospital, Kelsey Seybold Clinic',
+                prescriptions: 'Ozempic, Metformin',
+                location: 'houston',
+                radius: '25',
+                city: 'Houston',
+            },
+            'austin-mix': {
+                providers: "Sarah Lee, St. David's Medical Center, Ascension Seton Medical Center Austin",
+                prescriptions: 'Humira, Albuterol',
+                location: 'austin',
+                radius: '25',
+                city: 'Austin',
+            },
+            'san-antonio-wide': {
+                providers: 'Juan Martinez, Methodist Hospital, University Hospital',
+                prescriptions: 'Atorvastatin, Lisinopril',
+                location: 'san antonio',
+                radius: '50',
+                city: 'San Antonio',
+            },
+        };
+
+        const searchForm = document.getElementById('searchForm');
+        const sourceStatusDiv = document.getElementById('sourceStatus');
+        const resultsDiv = document.getElementById('results');
+
+        searchForm.addEventListener('submit', async function(e) {
             e.preventDefault();
 
             const btn = document.getElementById('searchBtn');
-            const resultsDiv = document.getElementById('results');
 
             btn.disabled = true;
             btn.textContent = 'Searching...';
-            resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Searching NPI Registry...</div>';
+            resultsDiv.innerHTML = '<div class="loading"><div class="spinner"></div>Checking NPI Registry and public Marketplace data...</div>';
 
             const formData = new FormData(this);
             const params = new URLSearchParams(formData);
@@ -373,58 +1449,16 @@ HTML_TEMPLATE = """
                 const response = await fetch('/search?' + params.toString());
                 const data = await response.json();
 
-                let html = '<div class="results">';
+                const providerResults = Array.isArray(data) ? data : data.providers;
+                const prescriptionResults = Array.isArray(data) ? [] : data.prescriptions;
+                const networks = Array.isArray(data) ? collectNetworks(data) : data.networks;
+                const sourceGroups = Array.isArray(data) ? [] : data.sources || [];
 
-                for (const result of data) {
-                    html += '<div class="result-card">';
-                    html += `<div class="doctor-name">${result.doctor}`;
-                    if (result.specialty_filter) {
-                        html += ` <span style="color: #6b7280; font-weight: normal;">[${result.specialty_filter}]</span>`;
-                    }
-                    if (result.npi_found) {
-                        html += `<span class="badge badge-success">${result.npi_count} found</span>`;
-                    } else {
-                        html += '<span class="badge badge-error">Not found</span>';
-                    }
-                    html += '</div>';
+                let html = renderConfidenceLegend(providerResults, prescriptionResults);
+                html += renderLookupMatrix(providerResults, prescriptionResults, networks);
 
-                    html += '<div class="npi-results">';
-                    if (result.npi_found) {
-                        for (const npi of result.npi_results) {
-                            html += '<div class="npi-item">';
-                            html += `<div class="npi-name">${npi.name}, ${npi.credential}</div>`;
-                            html += `<div class="npi-detail">NPI: ${npi.npi} | ${npi.specialty}</div>`;
-                            html += `<div class="npi-detail">${npi.location}${npi.phone ? ' | ' + npi.phone : ''}</div>`;
-                            html += '</div>';
-                        }
-                    } else {
-                        html += '<div class="npi-item not-found">';
-                        html += '<div class="npi-name">No matches in NPI Registry</div>';
-                        html += '<div class="npi-detail">Try different spelling or remove specialty filter</div>';
-                        html += '</div>';
-                    }
-                    html += '</div>';
-
-                    html += '<div class="network-section">';
-                    html += '<div class="network-label">BCBSTX:</div>';
-                    html += '<div class="network-links">';
-                    for (const [key, urlInfo] of Object.entries(result.bcbstx_urls)) {
-                        html += `<a href="${urlInfo.url}" target="_blank" class="network-link bcbstx">${urlInfo.name} &rarr;</a>`;
-                    }
-                    html += '</div></div>';
-
-                    html += '<div class="network-section">';
-                    html += '<div class="network-label">UHC:</div>';
-                    html += '<div class="network-links">';
-                    for (const [key, urlInfo] of Object.entries(result.uhc_urls)) {
-                        html += `<a href="${urlInfo.url}" target="_blank" class="network-link uhc">${urlInfo.name} &rarr;</a>`;
-                    }
-                    html += '</div></div>';
-
-                    html += '</div>';
-                }
-
-                html += '</div>';
+                html += renderProviderDetails(providerResults);
+                html += renderCarrierSourceDetails(sourceGroups);
                 resultsDiv.innerHTML = html;
 
             } catch (error) {
@@ -432,8 +1466,635 @@ HTML_TEMPLATE = """
             }
 
             btn.disabled = false;
-            btn.textContent = 'Search Doctors';
+            btn.textContent = 'Search';
         });
+
+        resultsDiv.addEventListener('pointerover', function(e) {
+            const cell = e.target.closest('[data-column-index]');
+            if (!cell || !resultsDiv.contains(cell)) {
+                return;
+            }
+            setColumnHover(cell);
+        });
+
+        resultsDiv.addEventListener('pointerleave', clearColumnHover);
+
+        sourceStatusDiv.addEventListener('click', async function(e) {
+            const button = e.target.closest('[data-source-refresh]');
+            if (!button) {
+                return;
+            }
+            button.disabled = true;
+            await refreshSourceStatus();
+        });
+
+        for (const link of document.querySelectorAll('[data-sample]')) {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                applyScenario(this.dataset.sample);
+            });
+        }
+
+        document.getElementById('randomDemoBtn').addEventListener('click', function() {
+            const sampleIds = Object.keys(sampleScenarios);
+            const sampleId = sampleIds[Math.floor(Math.random() * sampleIds.length)];
+            applyScenario(sampleId);
+        });
+
+        const initialSample = new URLSearchParams(window.location.search).get('sample');
+        if (initialSample && sampleScenarios[initialSample]) {
+            applyScenario(initialSample);
+        }
+        loadSourceStatus();
+
+        function applyScenario(sampleId) {
+            const scenario = sampleScenarios[sampleId];
+            if (!scenario) {
+                return;
+            }
+
+            document.getElementById('doctors').value = scenario.providers;
+            document.getElementById('prescriptions').value = scenario.prescriptions || '';
+            document.getElementById('location').value = scenario.location;
+            document.getElementById('radius').value = scenario.radius;
+            document.getElementById('city').value = scenario.city;
+            searchForm.requestSubmit();
+        }
+
+        function formatProviderType(providerType) {
+            if (providerType === 'not_found') {
+                return 'Not found';
+            }
+            return providerType.charAt(0).toUpperCase() + providerType.slice(1);
+        }
+
+        function providerTagClass(providerType) {
+            return providerType === 'not_found' ? 'not-found' : providerType;
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, function(char) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;',
+                }[char];
+            });
+        }
+
+        function tooltipAttribute(value) {
+            if (!value) {
+                return '';
+            }
+            return ` data-tooltip="${escapeHtml(value)}"`;
+        }
+
+        function renderInfoTip(label, tooltip, className) {
+            if (!tooltip) {
+                return '';
+            }
+            const classes = className ? `info-tip ${className}` : 'info-tip';
+            return `<span class="${classes}" tabindex="0" aria-label="${escapeHtml(label)}"${tooltipAttribute(tooltip)}>i</span>`;
+        }
+
+        function clearColumnHover() {
+            resultsDiv.querySelectorAll('.column-hover').forEach(function(element) {
+                element.classList.remove('column-hover');
+            });
+        }
+
+        function setColumnHover(cell) {
+            const table = cell.closest('.network-matrix');
+            if (!table) {
+                return;
+            }
+            clearColumnHover();
+            if (cell.dataset.columnIndex === '0') {
+                return;
+            }
+            table.querySelectorAll(`[data-column-index="${cell.dataset.columnIndex}"]`).forEach(function(element) {
+                element.classList.add('column-hover');
+            });
+        }
+
+        function formatFreshnessTime(value) {
+            if (!value) {
+                return 'Never checked';
+            }
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) {
+                return value;
+            }
+            return date.toLocaleString([], {
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+            });
+        }
+
+        function renderSourceStatus(statusInfo) {
+            const status = statusInfo || { status: 'never_checked', counts: {} };
+            const counts = status.counts || {};
+            const pufUpdates = status.puf && status.puf.updates ? Object.entries(status.puf.updates) : [];
+            const pufCopy = pufUpdates.length
+                ? ` CMS PUF dates: ${pufUpdates.map(([name, date]) => `${name} ${date}`).join('; ')}.`
+                : '';
+            const changedCopy = `${counts.changed || 0} changed, ${counts.suspect || 0} suspect, ${counts.missing || 0} missing.`;
+            const isChecking = status.in_progress || status.status === 'checking';
+
+            let html = '<div class="source-freshness" aria-label="Last updated">';
+            html += '<div>';
+            html += '<div class="source-freshness-title">Last updated</div>';
+            html += `<div class="source-freshness-copy">${escapeHtml(formatFreshnessTime(status.last_checked))}. ${counts.total || 0} sources watched; ${escapeHtml(changedCopy)}${escapeHtml(pufCopy)}</div>`;
+            html += '</div>';
+            html += '<div class="source-freshness-action">';
+            html += `<button type="button" class="source-freshness-button" data-source-refresh ${isChecking ? 'disabled' : ''}>${isChecking ? 'Checking...' : 'Check for updates'}</button>`;
+            html += '</div></div>';
+            sourceStatusDiv.innerHTML = html;
+        }
+
+        async function loadSourceStatus() {
+            try {
+                const response = await fetch('/sources/status');
+                const status = await response.json();
+                renderSourceStatus(status);
+                if (status.in_progress || status.status === 'checking') {
+                    window.setTimeout(loadSourceStatus, 1800);
+                }
+            } catch (error) {
+                renderSourceStatus({
+                    status: 'suspect',
+                    counts: {},
+                    last_checked: '',
+                    in_progress: false,
+                });
+            }
+        }
+
+        async function refreshSourceStatus() {
+            try {
+                const response = await fetch('/sources/check', { method: 'POST' });
+                const status = await response.json();
+                renderSourceStatus(status);
+                window.setTimeout(loadSourceStatus, 1800);
+            } catch (error) {
+                renderSourceStatus({
+                    status: 'suspect',
+                    counts: {},
+                    last_checked: '',
+                    in_progress: false,
+                });
+            }
+        }
+
+        function networkStatusClass(status) {
+            return {
+                in: 'in',
+                out: 'out',
+                drug_covered: 'in',
+                generic_covered: 'generic-covered',
+                likely_in: 'likely-in',
+                likely_covered: 'likely-covered',
+                partial_coverage: 'partial-coverage',
+                partial_match: 'partial-coverage',
+                drug_not_covered: 'out',
+                data_not_provided: 'data-not-provided',
+                suspect: 'suspect',
+                not_found: 'not-found',
+                no_record: 'no-record',
+                lookup_error: 'lookup-error',
+                not_offered: 'not-offered',
+                not_configured: 'not-configured',
+                no_result: 'no-result',
+                unknown: 'unknown',
+            }[status] || 'no-result';
+        }
+
+        function networkStatusIcon(status) {
+            if (status === 'in') {
+                return '&check;';
+            }
+            if (status === 'drug_covered' || status === 'generic_covered') {
+                return '&check;';
+            }
+            if (status === 'likely_in' || status === 'likely_covered') {
+                return '&check;';
+            }
+            if (status === 'partial_coverage' || status === 'partial_match') {
+                return '!';
+            }
+            if (status === 'out' || status === 'drug_not_covered') {
+                return '&times;';
+            }
+            if (status === 'not_found' || status === 'data_not_provided' || status === 'suspect') {
+                return '!';
+            }
+            if (status === 'lookup_error' || status === 'no_record') {
+                return '!';
+            }
+            if (status === 'not_offered' || status === 'not_configured' || status === 'no_result') {
+                return '';
+            }
+            return '?';
+        }
+
+        function networkStatusLabel(status) {
+            if (status === 'in') {
+                return 'In';
+            }
+            if (status === 'out') {
+                return 'Out';
+            }
+            if (status === 'drug_covered') {
+                return 'Covered';
+            }
+            if (status === 'generic_covered') {
+                return 'Generic';
+            }
+            if (status === 'likely_in') {
+                return 'Likely';
+            }
+            if (status === 'likely_covered') {
+                return 'Likely';
+            }
+            if (status === 'partial_coverage' || status === 'partial_match') {
+                return 'Partial';
+            }
+            if (status === 'drug_not_covered') {
+                return 'Not covered';
+            }
+            if (status === 'data_not_provided') {
+                return 'No data';
+            }
+            if (status === 'suspect') {
+                return 'Suspect';
+            }
+            if (status === 'not_found') {
+                return 'Not found';
+            }
+            if (status === 'no_record') {
+                return 'No record';
+            }
+            if (status === 'lookup_error') {
+                return 'Error';
+            }
+            if (status === 'not_offered') {
+                return 'Not offered';
+            }
+            if (status === 'not_configured') {
+                return 'No lookup';
+            }
+            if (status === 'no_result') {
+                return '-';
+            }
+            return '-';
+        }
+
+        function renderNetworkStatus(statusInfo) {
+            const info = statusInfo || { status: 'no_result', detail: 'No lookup result', source: 'No result' };
+            const status = info.status || 'no_result';
+
+            let html = `<div class="network-status ${networkStatusClass(status)}">`;
+            const icon = networkStatusIcon(status);
+            if (icon) {
+                html += `<span class="network-status-icon">${icon}</span>`;
+            }
+            html += `<span class="network-status-label">${networkStatusLabel(status)}</span>`;
+            html += '</div>';
+            return html;
+        }
+
+        function networkStatusTooltip(statusInfo) {
+            const info = statusInfo || { status: 'no_result', detail: 'No lookup result', source: 'No result' };
+            const status = info.status || 'no_result';
+            const detail = info.detail || '';
+            const source = info.source || '';
+            const reason = networkStatusReason(status, detail);
+            const parts = [networkStatusLabel(status)];
+            if (reason) {
+                parts.push(reason);
+            }
+            if (source) {
+                parts.push(`Source: ${source}`);
+            }
+            if (detail && detail !== reason) {
+                parts.push(detail);
+            }
+            return parts.join(' | ');
+        }
+
+        function networkStatusReason(status, detail) {
+            if (status === 'suspect') {
+                if (detail.includes('Selected RxCUI')) {
+                    return 'Selected RxCUI not covered; exact drug may differ';
+                }
+                return 'CMS data needs direct confirmation';
+            }
+            if (status === 'likely_covered') {
+                return 'Coverage found; confirm exact RxCUI';
+            }
+            if (status === 'likely_in') {
+                return 'Coverage found; confirm exact NPI/location';
+            }
+            if (status === 'partial_coverage') {
+                return 'Only some matched plan IDs covered';
+            }
+            if (status === 'not_offered') {
+                return 'No matching plans in this location';
+            }
+            if (status === 'no_record') {
+                return 'No CMS coverage row found';
+            }
+            if (status === 'lookup_error') {
+                return 'CMS lookup failed';
+            }
+            return '';
+        }
+
+        function renderConfidenceLegend(providerResults, prescriptionResults) {
+            if (!providerResults.length && !prescriptionResults.length) {
+                return '';
+            }
+
+            let html = '<div class="confidence-legend" aria-label="Data confidence legend">';
+            html += '<div class="legend-item"><span class="legend-swatch verified"></span><div><div class="legend-title">Verified</div><div class="legend-copy">Exact NPI or RxCUI, fresh CMS data, all matched plan IDs agree.</div></div></div>';
+            html += '<div class="legend-item"><span class="legend-swatch likely"></span><div><div class="legend-title">Likely</div><div class="legend-copy">CMS found coverage, but exact NPI/location or RxCUI should be confirmed.</div></div></div>';
+            html += '<div class="legend-item"><span class="legend-swatch partial"></span><div><div class="legend-title">Partial coverage</div><div class="legend-copy">Only some matched plan IDs show coverage.</div></div></div>';
+            html += '<div class="legend-item"><span class="legend-swatch suspect"></span><div><div class="legend-title">Suspect</div><div class="legend-copy">Missing, stale, errored, or carrier-conflicting data; verify directly.</div></div></div>';
+            html += '<div class="legend-item"><span class="legend-swatch not-offered"></span><div><div class="legend-title">Not offered</div><div class="legend-copy">CMS found no matching plans for that network in this location.</div></div></div>';
+            html += '</div>';
+            return html;
+        }
+
+        function compactText(value, maxLength) {
+            const text = String(value || '');
+            if (text.length <= maxLength) {
+                return text;
+            }
+            return text.slice(0, maxLength - 1) + '...';
+        }
+
+        function providerMatchTooltip(result) {
+            if (!result.npi_found) {
+                return 'No NPI Registry matches found. Try a different spelling or city.';
+            }
+            const matches = (result.npi_results || []).slice(0, 5).map(function(npi, index) {
+                const parts = [
+                    npi.name,
+                    npi.npi ? `NPI ${npi.npi}` : '',
+                    npi.specialty,
+                    npi.location,
+                    npi.phone,
+                ].filter(Boolean);
+                return `${index + 1}. ${parts.join(' | ')}`;
+            });
+            const extra = result.npi_count > matches.length ? ` ${result.npi_count - matches.length} more not shown.` : '';
+            return `${result.npi_count} NPI match${result.npi_count === 1 ? '' : 'es'}. ${matches.join(' ')}${extra}`;
+        }
+
+        function providerMatchSummary(result) {
+            const label = result.npi_found ? `${result.npi_count} NPI match${result.npi_count === 1 ? '' : 'es'}` : 'No NPI match';
+            return escapeHtml(label);
+        }
+
+        function drugMatchName(drug) {
+            return [drug.name, drug.strength, drug.route].filter(Boolean).join(' ') || drug.full_name || drug.rxcui || 'Drug match';
+        }
+
+        function prescriptionMatchTooltip(result) {
+            if (!result.drug_found) {
+                return 'No CMS RxCUI match found for this prescription name.';
+            }
+            const matches = (result.drug_results || []).slice(0, 5).map(function(drug, index) {
+                return `${index + 1}. ${drugMatchName(drug)}${drug.rxcui ? ' | RxCUI ' + drug.rxcui : ''}`;
+            });
+            const count = result.drug_match_count || 0;
+            const selected = `${result.drug_name || result.prescription} | RxCUI ${result.rxcui}`;
+            const extra = count > matches.length ? ` ${count - matches.length} more not shown.` : '';
+            return `Selected ${selected}; selected from ${count} RxCUI match${count === 1 ? '' : 'es'}. ${matches.join(' ')}${extra}`;
+        }
+
+        function prescriptionMatchSummary(result) {
+            if (!result.drug_found) {
+                return 'No RxCUI match';
+            }
+            const matchCount = result.drug_match_count || 0;
+            const selected = compactText(`${result.drug_name || result.prescription} | RxCUI ${result.rxcui}`, 68);
+            const countLabel = matchCount > 1 ? ` | ${matchCount} matches` : '';
+            return escapeHtml(selected + countLabel);
+        }
+
+        function collectNetworks(results) {
+            const networks = [];
+            const seen = new Set();
+
+            for (const result of results || []) {
+                for (const network of result.networks || []) {
+                    if (seen.has(network.id)) {
+                        continue;
+                    }
+                    seen.add(network.id);
+                    networks.push(network);
+                }
+            }
+
+            return networks;
+        }
+
+        function renderLookupMatrix(providerResults, prescriptionResults, networks) {
+            if (!providerResults.length && !prescriptionResults.length) {
+                return '';
+            }
+
+            let html = '<div class="network-matrix-wrap">';
+            html += '<div class="network-matrix-title">Results</div>';
+            html += '<div class="network-matrix-note">CMS checks by matched NPI or RxCUI. Hover any status for detail.</div>';
+            html += '<div class="network-matrix-scroll"><table class="network-matrix">';
+            html += '<thead><tr><th data-column-index="0" aria-label="Lookup item"></th>';
+            for (const [index, network] of networks.entries()) {
+                html += `<th data-column-index="${index + 1}">${escapeHtml(network.name)}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            if (providerResults.length) {
+                html += renderLookupSection(
+                    'Providers',
+                    'CMS provider coverage by matched NPI. Confirm exact NPI/location.',
+                    networks.length + 1
+                );
+                for (const result of providerResults) {
+                    html += renderProviderLookupRow(result, networks);
+                }
+            }
+
+            if (prescriptionResults.length) {
+                html += renderLookupSection(
+                    'Prescriptions',
+                    'CMS formulary coverage by RxCUI. Confirm exact strength/form.',
+                    networks.length + 1
+                );
+                for (const result of prescriptionResults) {
+                    html += renderPrescriptionLookupRow(result, networks);
+                }
+            }
+
+            html += '</tbody></table></div></div>';
+            return html;
+        }
+
+        function renderLookupSection(title, copy, colspan) {
+            let html = `<tr class="lookup-section-row"><td colspan="${colspan}">`;
+            html += `<div class="lookup-section-title">${escapeHtml(title)}</div>`;
+            html += `<div class="lookup-section-copy">${escapeHtml(copy)}</div>`;
+            html += '</td></tr>';
+            return html;
+        }
+
+        function renderProviderLookupRow(result, networks) {
+            let html = '<tr class="lookup-row">';
+            html += '<td class="lookup-item-cell" data-column-index="0">';
+            html += '<div class="lookup-item-content">';
+            html += renderInfoTip('NPI match details', providerMatchTooltip(result), 'item-info');
+            html += '<div class="lookup-item-heading-row">';
+            html += `<div class="lookup-item-heading">${escapeHtml(result.provider)}</div>`;
+            html += `<span class="provider-tag item-tag ${providerTagClass(result.provider_type)}">${formatProviderType(result.provider_type)}</span>`;
+            html += '</div>';
+            html += `<div class="lookup-item-meta">${providerMatchSummary(result)}</div>`;
+            html += '</div>';
+            html += '</td>';
+            html += renderStatusCells(result.network_statuses || {}, networks);
+            html += '</tr>';
+            return html;
+        }
+
+        function renderPrescriptionLookupRow(result, networks) {
+            let html = '<tr class="lookup-row">';
+            const tagClass = result.drug_found ? 'rx' : 'not-found';
+            const tagLabel = result.drug_found ? 'Rx' : 'Not found';
+            html += '<td class="lookup-item-cell" data-column-index="0">';
+            html += '<div class="lookup-item-content">';
+            html += renderInfoTip('RxCUI match details', prescriptionMatchTooltip(result), 'item-info');
+            html += '<div class="lookup-item-heading-row">';
+            html += `<div class="lookup-item-heading">${escapeHtml(result.prescription)}</div>`;
+            html += `<span class="provider-tag item-tag ${tagClass}">${tagLabel}</span>`;
+            html += '</div>';
+            html += `<div class="lookup-item-meta">${prescriptionMatchSummary(result)}</div>`;
+            html += '</div>';
+            html += '</td>';
+            html += renderStatusCells(result.network_statuses || {}, networks);
+            html += '</tr>';
+            return html;
+        }
+
+        function renderStatusCells(statuses, networks) {
+            let html = '';
+            for (const [index, network] of networks.entries()) {
+                const statusInfo = statuses[network.id];
+                html += `<td class="network-cell" data-column-index="${index + 1}"${tooltipAttribute(networkStatusTooltip(statusInfo))}>`;
+                html += renderNetworkStatus(statusInfo);
+                html += '</td>';
+            }
+            return html;
+        }
+
+        function renderProviderDetails(results) {
+            if (!results.length) {
+                return '';
+            }
+
+            let html = '<details class="provider-details">';
+            html += '<summary>Provider NPI matches and carrier directory links</summary>';
+            html += '<div class="results">';
+
+            for (const result of results) {
+                html += '<div class="result-card">';
+                html += `<div class="doctor-name">${result.provider}`;
+                html += ` <span class="provider-tag ${providerTagClass(result.provider_type)}">${formatProviderType(result.provider_type)}</span>`;
+                if (result.specialty_filter) {
+                    html += ` <span style="color: #6b7280; font-weight: normal;">[${result.specialty_filter}]</span>`;
+                }
+                if (result.npi_found) {
+                    html += `<span class="badge badge-success">${result.npi_count} found</span>`;
+                } else {
+                    html += '<span class="badge badge-error">Not found</span>';
+                }
+                html += '</div>';
+
+                html += '<div class="npi-results">';
+                if (result.npi_found) {
+                    for (const npi of result.npi_results) {
+                        const credential = npi.credential ? `, ${npi.credential}` : '';
+                        html += '<div class="npi-item">';
+                        html += `<div class="npi-name">${npi.name}${credential}</div>`;
+                        html += `<div class="npi-detail">NPI: ${npi.npi} | ${npi.specialty}</div>`;
+                        html += `<div class="npi-detail">${npi.location}${npi.phone ? ' | ' + npi.phone : ''}</div>`;
+                        html += '</div>';
+                    }
+                } else {
+                    html += '<div class="npi-item not-found">';
+                    html += '<div class="npi-name">No matches in NPI Registry</div>';
+                    html += '<div class="npi-detail">Try different spelling or remove specialty/type filter</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+
+                html += '<div class="network-section">';
+                html += '<div class="network-label">BCBSTX:</div>';
+                html += '<div class="network-links">';
+                for (const [key, urlInfo] of Object.entries(result.bcbstx_urls)) {
+                    html += `<a href="${urlInfo.url}" target="_blank" class="network-link bcbstx">${urlInfo.name} &rarr;</a>`;
+                }
+                html += '</div></div>';
+
+                html += '<div class="network-section">';
+                html += '<div class="network-label">UHC:</div>';
+                html += '<div class="network-links">';
+                for (const [key, urlInfo] of Object.entries(result.uhc_urls)) {
+                    html += `<a href="${urlInfo.url}" target="_blank" class="network-link uhc">${urlInfo.name} &rarr;</a>`;
+                }
+                html += '</div></div>';
+
+                html += '</div>';
+            }
+
+            html += '</div></details>';
+            return html;
+        }
+
+        function renderCarrierSourceDetails(sourceGroups) {
+            if (!sourceGroups.length) {
+                return '';
+            }
+
+            let html = '<details class="source-details">';
+            html += '<summary>Carrier source map and open questions</summary>';
+            for (const group of sourceGroups) {
+                html += '<div class="source-group">';
+                html += `<div class="source-carrier">${escapeHtml(group.carrier)}</div>`;
+                for (const source of group.sources || []) {
+                    html += '<div class="source-row">';
+                    html += `<a class="source-link" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.name)}</a>`;
+                    html += `<div class="source-meta">${escapeHtml(source.kind)} | ${escapeHtml(source.year)} | ${escapeHtml(source.identifier)} | Checked ${escapeHtml(source.checked_on)} | ${escapeHtml(source.validation)}</div>`;
+                    if (source.description) {
+                        html += `<div class="source-description">${escapeHtml(source.description)}</div>`;
+                    }
+                    html += `<div class="source-note">${escapeHtml(source.role)}</div>`;
+                    if (source.note) {
+                        html += `<div class="source-note">${escapeHtml(source.note)}</div>`;
+                    }
+                    html += '</div>';
+                }
+                for (const question of group.open_questions || []) {
+                    html += `<div class="source-question">Open question: ${escapeHtml(question)}</div>`;
+                }
+                html += '</div>';
+            }
+            html += '</details>';
+            return html;
+        }
     </script>
 
     <footer class="footer">
@@ -444,32 +2105,43 @@ HTML_TEMPLATE = """
 """
 
 
-def search_npi(name, state="TX", city=None, specialty=None, limit=10):
-    """Search the NPI Registry for providers."""
-    name_parts = name.replace("Dr.", "").replace("Dr", "").strip()
+def normalize_provider_type(provider_type):
+    if provider_type in {"doctor", "facility"}:
+        return provider_type
+    return "auto"
 
-    if "," in name_parts:
-        last, first = [p.strip() for p in name_parts.split(",", 1)]
-    else:
-        parts = name_parts.split()
-        if len(parts) >= 2:
-            first = parts[0]
-            last = " ".join(parts[1:])
-        else:
-            first = ""
-            last = name_parts
+
+def search_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="doctor"):
+    """Search the NPI Registry for providers."""
+    provider_type = "facility" if provider_type == "facility" else "doctor"
 
     params = {
         "version": "2.1",
         "limit": limit,
-        "enumeration_type": "NPI-1",
+        "enumeration_type": "NPI-2" if provider_type == "facility" else "NPI-1",
         "state": state,
     }
 
-    if first:
-        params["first_name"] = first
-    if last:
-        params["last_name"] = last
+    if provider_type == "facility":
+        params["organization_name"] = name.strip()
+    else:
+        name_parts = name.replace("Dr.", "").replace("Dr", "").strip()
+
+        if "," in name_parts:
+            last, first = [p.strip() for p in name_parts.split(",", 1)]
+        else:
+            parts = name_parts.split()
+            if len(parts) >= 2:
+                first = parts[0]
+                last = " ".join(parts[1:])
+            else:
+                first = ""
+                last = name_parts
+
+        if first:
+            params["first_name"] = first
+        if last:
+            params["last_name"] = last
     if city:
         params["city"] = city
 
@@ -499,9 +2171,13 @@ def search_npi(name, state="TX", city=None, specialty=None, limit=10):
             if specialty and specialty.lower() not in specialty_name.lower():
                 continue
 
+            result_name = basic.get("organization_name", "").strip()
+            if provider_type == "doctor":
+                result_name = f"{basic.get('first_name', '')} {basic.get('last_name', '')}".strip()
+
             results.append({
                 "npi": r.get("number", ""),
-                "name": f"{basic.get('first_name', '')} {basic.get('last_name', '')}".strip(),
+                "name": result_name,
                 "credential": basic.get("credential", ""),
                 "specialty": specialty_name,
                 "location": f"{practice_addr.get('city', '')}, {practice_addr.get('state', '')} {practice_addr.get('postal_code', '')[:5]}",
@@ -511,6 +2187,139 @@ def search_npi(name, state="TX", city=None, specialty=None, limit=10):
         return results
     except Exception:
         return []
+
+
+def resolve_provider_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="auto"):
+    provider_type = normalize_provider_type(provider_type)
+
+    if provider_type in {"doctor", "facility"}:
+        results = search_npi(
+            name, state=state, city=city, specialty=specialty,
+            limit=limit, provider_type=provider_type
+        )
+        return results, provider_type if results else "not_found"
+
+    doctor_results = search_npi(
+        name, state=state, city=city, specialty=specialty,
+        limit=limit, provider_type="doctor"
+    )
+    if doctor_results:
+        return doctor_results, "doctor"
+
+    facility_results = search_npi(
+        name, state=state, city=city, specialty=specialty,
+        limit=limit, provider_type="facility"
+    )
+    if facility_results:
+        return facility_results, "facility"
+
+    return [], "not_found"
+
+
+def normalize_search_text(value):
+    return " ".join(value.lower().split())
+
+
+def format_drug_name(drug):
+    parts = [
+        drug.get("name", ""),
+        drug.get("strength", ""),
+        drug.get("route", ""),
+    ]
+    return " ".join(part for part in parts if part).strip()
+
+
+def drug_match_score(query, drug):
+    query_text = normalize_search_text(query)
+    name = normalize_search_text(drug.get("name", ""))
+    full_name = normalize_search_text(drug.get("full_name", ""))
+    route = normalize_search_text(drug.get("route", ""))
+    is_exact_brand = name == query_text and drug.get("name", "").isupper()
+    score = 0
+
+    if name == query_text:
+        score += 100
+    elif name.startswith(query_text):
+        score += 60
+    elif query_text in name:
+        score += 30
+    if query_text in full_name:
+        score += 10
+    if "/" not in name:
+        score += 15
+    if "[" not in full_name:
+        score += 5
+    if not is_exact_brand:
+        if "oral pill" in route or "oral tablet" in full_name:
+            score += 8
+        if "injectable" in route or "injection" in full_name:
+            score -= 8
+
+    return score
+
+
+def drug_is_combination_match(query, drug):
+    query_text = normalize_search_text(query)
+    if "/" in query_text:
+        return False
+    drug_text = normalize_search_text(
+        " ".join([
+            drug.get("name", ""),
+            drug.get("full_name", ""),
+        ])
+    )
+    return "/" in drug_text
+
+
+def search_drugs(name, limit=10):
+    """Search the CMS Marketplace drug endpoint for RxCUI matches."""
+    try:
+        response = requests.get(
+            f"{CMS_MARKETPLACE_API}/drugs/autocomplete",
+            params={"apikey": CMS_MARKETPLACE_API_KEY, "q": name},
+            timeout=NETWORK_LOOKUP_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return []
+
+    if isinstance(data, dict):
+        drugs = data.get("drugs", [])
+    else:
+        drugs = data
+    return drugs[:limit]
+
+
+def resolve_prescription(name):
+    drug_results = search_drugs(name)
+    if not drug_results:
+        return {
+            "prescription": name,
+            "drug_found": False,
+            "drug_match_count": 0,
+            "drug_results": [],
+        }
+
+    selected = max(drug_results, key=lambda drug: drug_match_score(name, drug))
+    selected_is_combination = drug_is_combination_match(name, selected)
+    drug_match_warning = ""
+    if selected_is_combination:
+        drug_match_warning = (
+            f"CMS autocomplete selected a combination-product RxCUI for broad input '{name}'; "
+            "standalone drug coverage needs direct formulary confirmation. "
+        )
+    return {
+        "prescription": name,
+        "drug_found": True,
+        "drug_match_count": len(drug_results),
+        "drug_results": drug_results[:5],
+        "rxcui": selected.get("rxcui", ""),
+        "drug_name": format_drug_name(selected),
+        "drug_detail": selected.get("full_name", ""),
+        "selected_is_combination": selected_is_combination,
+        "drug_match_warning": drug_match_warning,
+    }
 
 
 def generate_bcbstx_urls(name, lat, lon, radius):
@@ -535,8 +2344,512 @@ def generate_uhc_urls():
     return urls
 
 
-def parse_doctors(doctor_input):
-    """Parse doctor input string."""
+def make_network_status(status, source, detail):
+    return {
+        "status": status,
+        "source": source,
+        "detail": detail,
+    }
+
+
+def plan_matches_marketplace_network(plan, network):
+    name = plan.get("name", "").lower()
+    network_url = plan.get("network_url", "").lower()
+
+    for fragment in network.get("marketplace_plan_name_contains", []):
+        if fragment.lower() not in name:
+            return False
+
+    url_fragment = network.get("marketplace_network_url_contains")
+    if url_fragment and url_fragment.lower() not in network_url:
+        return False
+
+    return True
+
+
+def chunked(items, size):
+    for index in range(0, len(items), size):
+        yield items[index:index + size]
+
+
+@lru_cache(maxsize=128)
+def get_marketplace_plan_ids(
+    issuer,
+    plan_year,
+    zipcode,
+    countyfips,
+    state,
+    plan_name_contains,
+    network_url_contains,
+):
+    plan_ids = []
+    offset = 0
+    network = {
+        "marketplace_plan_name_contains": plan_name_contains,
+        "marketplace_network_url_contains": network_url_contains,
+    }
+
+    while True:
+        payload = {
+            "market": "Individual",
+            "place": {
+                "zipcode": zipcode,
+                "countyfips": countyfips,
+                "state": state,
+            },
+            "year": plan_year,
+            "offset": offset,
+            "filter": {"issuer": issuer},
+        }
+
+        response = requests.post(
+            f"{CMS_MARKETPLACE_API}/plans/search",
+            params={"apikey": CMS_MARKETPLACE_API_KEY},
+            json=payload,
+            timeout=NETWORK_LOOKUP_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+        plans = data.get("plans", [])
+
+        for plan in plans:
+            if plan_matches_marketplace_network(plan, network):
+                plan_ids.append(plan["id"])
+
+        if len(plans) < 10:
+            break
+        offset += 10
+
+    return tuple(plan_ids)
+
+
+def get_network_plan_ids(network, place):
+    return get_marketplace_plan_ids(
+        network["marketplace_issuer"],
+        network["plan_year"],
+        place["zipcode"],
+        place["countyfips"],
+        place["state"],
+        tuple(network.get("marketplace_plan_name_contains", [])),
+        network.get("marketplace_network_url_contains", ""),
+    )
+
+
+def check_marketplace_network_status(provider_name, provider_type, npi_results, network, place):
+    expected_npis = {
+        str(result.get("npi"))
+        for result in npi_results
+        if result.get("npi")
+    }
+    if not expected_npis:
+        return make_network_status(
+            "not_found",
+            "NPI Registry",
+            "Provider was not found in the NPI Registry.",
+        )
+
+    try:
+        plan_ids = get_network_plan_ids(network, place)
+    except (requests.RequestException, ValueError) as error:
+        return make_network_status(
+            "lookup_error",
+            "CMS Marketplace API",
+            f"Marketplace plan lookup failed: {error}",
+        )
+
+    if not plan_ids:
+        return make_network_status(
+            "not_offered",
+            "CMS Marketplace API",
+            f"No matching Marketplace plans found for {network['name']} in {place['zipcode']}.",
+        )
+
+    coverage_rows = []
+    try:
+        for plan_id_group in chunked(plan_ids, 10):
+            response = requests.get(
+                f"{CMS_MARKETPLACE_API}/providers/covered",
+                params={
+                    "apikey": CMS_MARKETPLACE_API_KEY,
+                    "providerids": ",".join(sorted(expected_npis)),
+                    "planids": ",".join(plan_id_group),
+                    "year": network["plan_year"],
+                },
+                timeout=NETWORK_LOOKUP_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+            coverage_rows.extend(
+                row for row in data.get("coverage", [])
+                if str(row.get("npi")) in expected_npis and row.get("plan_id") in plan_ids
+            )
+    except (requests.RequestException, ValueError) as error:
+        return make_network_status(
+            "lookup_error",
+            "CMS Marketplace API",
+            f"Marketplace coverage lookup failed: {error}",
+        )
+
+    if not coverage_rows:
+        return make_network_status(
+            "no_record",
+            "CMS Marketplace API",
+            "Marketplace coverage returned no record matching the NPI Registry match.",
+        )
+
+    covered_rows = [
+        row for row in coverage_rows
+        if str(row.get("coverage", "")).lower() == "covered"
+    ]
+    if covered_rows:
+        covered_plan_ids = sorted({row["plan_id"] for row in covered_rows})
+        covered_npis = sorted({str(row.get("npi")) for row in covered_rows if row.get("npi")})
+        if len(covered_plan_ids) < len(plan_ids):
+            return make_network_status(
+                "partial_coverage",
+                "CMS Marketplace API",
+                f"CMS shows at least one NPI Registry match covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. {len(covered_npis)} of {len(expected_npis)} NPI matches had a Covered row; confirm the exact NPI and plan before treating this as fully in-network.",
+            )
+        if len(covered_npis) < len(expected_npis):
+            return make_network_status(
+                "likely_in",
+                "CMS Marketplace API",
+                f"CMS shows at least one NPI Registry match covered in all {len(plan_ids)} matching plan IDs. {len(covered_npis)} of {len(expected_npis)} NPI matches had a Covered row; confirm the exact NPI/location.",
+            )
+        return make_network_status(
+            "in",
+            "CMS Marketplace API",
+            f"CMS shows {provider_name} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs.",
+        )
+
+    return make_network_status(
+        "out",
+        "CMS Marketplace API",
+        f"CMS checked {len(plan_ids)} matching plan IDs and did not mark the NPI covered.",
+    )
+
+
+def summarize_coverage_counts(coverage_rows):
+    counts = Counter(row.get("coverage", "Unknown") for row in coverage_rows)
+    return ", ".join(
+        f"{coverage}: {count}"
+        for coverage, count in sorted(counts.items())
+    )
+
+
+def plan_ids_by_coverage_status(coverage_rows):
+    plan_ids_by_status = {}
+    for row in coverage_rows:
+        plan_ids_by_status.setdefault(row.get("coverage", ""), set()).add(row.get("plan_id"))
+    return plan_ids_by_status
+
+
+def prescription_match_note(prescription):
+    warning = prescription.get("drug_match_warning", "")
+    match_count = prescription.get("drug_match_count") or 0
+    if match_count <= 1:
+        return warning
+
+    return (
+        warning +
+        f"Selected RxCUI {prescription.get('rxcui')} from {match_count} CMS autocomplete matches; "
+        "exact strength/form can change coverage. "
+    )
+
+
+def prescription_candidate_rxcuis(prescription, limit=5):
+    selected = str(prescription.get("rxcui", "")).strip()
+    candidates = []
+    if selected:
+        candidates.append(selected)
+
+    if (prescription.get("drug_match_count") or 0) > 1:
+        for drug in prescription.get("drug_results", [])[:limit]:
+            rxcui = str(drug.get("rxcui", "")).strip()
+            if rxcui and rxcui not in candidates:
+                candidates.append(rxcui)
+
+    return tuple(candidates)
+
+
+def related_rxcui_coverage_status(prescription, related_rows, plan_ids, selected_rxcui):
+    related_covered_rows = [
+        row for row in related_rows
+        if row.get("coverage") in {"Covered", "GenericCovered"}
+    ]
+    if not related_covered_rows:
+        return None
+
+    covered_plan_ids = sorted({
+        row["plan_id"]
+        for row in related_covered_rows
+        if row.get("plan_id")
+    })
+    related_rxcuis = sorted({
+        str(row.get("rxcui"))
+        for row in related_covered_rows
+        if row.get("rxcui")
+    })
+    count_detail = summarize_coverage_counts(related_rows)
+    status = "suspect" if prescription.get("selected_is_combination") else "likely_covered"
+    if len(covered_plan_ids) < len(plan_ids):
+        status = "suspect" if prescription.get("selected_is_combination") else "partial_coverage"
+
+    detail_prefix = ""
+    if prescription.get("drug_match_warning"):
+        detail_prefix = prescription["drug_match_warning"]
+    return make_network_status(
+        status,
+        "CMS Marketplace API",
+        f"{detail_prefix}Selected RxCUI {selected_rxcui} was not marked covered, but CMS shows related RxCUI match(es) {', '.join(related_rxcuis)} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. Confirm exact strength/form. {count_detail}.",
+    )
+
+
+def check_marketplace_drug_status(prescription, network, place):
+    if not prescription.get("drug_found") or not prescription.get("rxcui"):
+        return make_network_status(
+            "not_found",
+            "CMS Marketplace API",
+            "No RxCUI match was found for this prescription name.",
+        )
+
+    try:
+        plan_ids = get_network_plan_ids(network, place)
+    except (requests.RequestException, ValueError) as error:
+        return make_network_status(
+            "lookup_error",
+            "CMS Marketplace API",
+            f"Marketplace plan lookup failed: {error}",
+        )
+
+    if not plan_ids:
+        return make_network_status(
+            "not_offered",
+            "CMS Marketplace API",
+            f"No matching Marketplace plans found for {network['name']} in {place['zipcode']}.",
+        )
+
+    rxcui = str(prescription["rxcui"])
+    candidate_rxcuis = prescription_candidate_rxcuis(prescription)
+    coverage_rows = []
+    try:
+        for plan_id_group in chunked(plan_ids, 10):
+            response = requests.get(
+                f"{CMS_MARKETPLACE_API}/drugs/covered",
+                params={
+                    "apikey": CMS_MARKETPLACE_API_KEY,
+                    "drugs": ",".join(candidate_rxcuis),
+                    "planids": ",".join(plan_id_group),
+                    "year": network["plan_year"],
+                },
+                timeout=NETWORK_LOOKUP_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+            coverage_rows.extend(
+                row for row in data.get("coverage", [])
+                if str(row.get("rxcui")) in candidate_rxcuis and row.get("plan_id") in plan_ids
+            )
+    except (requests.RequestException, ValueError) as error:
+        return make_network_status(
+            "lookup_error",
+            "CMS Marketplace API",
+            f"Marketplace drug coverage lookup failed: {error}",
+        )
+
+    selected_rows = [
+        row for row in coverage_rows
+        if str(row.get("rxcui")) == rxcui
+    ]
+    related_rows = [
+        row for row in coverage_rows
+        if str(row.get("rxcui")) != rxcui
+    ]
+
+    if not selected_rows:
+        related_status = related_rxcui_coverage_status(
+            prescription, related_rows, plan_ids, rxcui
+        )
+        if related_status:
+            return related_status
+        if len(candidate_rxcuis) > 1:
+            return make_network_status(
+                "suspect",
+                "CMS Marketplace API",
+                f"Selected RxCUI {rxcui} from {len(candidate_rxcuis)} CMS autocomplete candidates returned no matching coverage row. Exact strength/form may differ; confirm directly.",
+            )
+        return make_network_status(
+            "no_record",
+            "CMS Marketplace API",
+            "Marketplace drug coverage returned no record matching the RxCUI.",
+        )
+
+    counts = Counter(row.get("coverage", "") for row in selected_rows)
+    plan_ids_by_status = plan_ids_by_coverage_status(selected_rows)
+    count_detail = summarize_coverage_counts(selected_rows)
+    match_note = prescription_match_note(prescription)
+    if counts["Covered"]:
+        covered_plan_ids = plan_ids_by_status.get("Covered", set())
+        if prescription.get("selected_is_combination"):
+            return make_network_status(
+                "suspect",
+                "CMS Marketplace API",
+                f"{match_note}CMS found coverage for {prescription['drug_name']}, but that RxCUI is not reliable evidence for the broad standalone drug name. {count_detail}.",
+            )
+        if len(covered_plan_ids) < len(plan_ids):
+            return make_network_status(
+                "partial_coverage",
+                "CMS Marketplace API",
+                f"{match_note}CMS shows {prescription['drug_name']} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. {count_detail}.",
+            )
+        if match_note:
+            return make_network_status(
+                "likely_covered",
+                "CMS Marketplace API",
+                f"{match_note}CMS shows {prescription['drug_name']} covered in all {len(plan_ids)} matching plan IDs. {count_detail}.",
+            )
+        return make_network_status(
+            "drug_covered",
+            "CMS Marketplace API",
+            f"CMS shows {prescription['drug_name']} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. {count_detail}.",
+        )
+    if counts["GenericCovered"]:
+        generic_plan_ids = plan_ids_by_status.get("GenericCovered", set())
+        generic_rxcuis = sorted({
+            row.get("generic_rxcui", "")
+            for row in selected_rows
+            if row.get("generic_rxcui")
+        })
+        generic_note = f" Generic RxCUI: {', '.join(generic_rxcuis)}." if generic_rxcuis else ""
+        if prescription.get("selected_is_combination"):
+            return make_network_status(
+                "suspect",
+                "CMS Marketplace API",
+                f"{match_note}CMS found generic coverage for {prescription['drug_name']}, but that RxCUI is not reliable evidence for the broad standalone drug name.{generic_note} {count_detail}.",
+            )
+        if len(generic_plan_ids) < len(plan_ids):
+            return make_network_status(
+                "partial_coverage",
+                "CMS Marketplace API",
+                f"{match_note}CMS shows a generic equivalent covered in {len(generic_plan_ids)} of {len(plan_ids)} matching plan IDs.{generic_note} {count_detail}.",
+            )
+        if match_note:
+            return make_network_status(
+                "likely_covered",
+                "CMS Marketplace API",
+                f"{match_note}CMS shows a generic equivalent covered in all {len(plan_ids)} matching plan IDs.{generic_note} {count_detail}.",
+            )
+        return make_network_status(
+            "generic_covered",
+            "CMS Marketplace API",
+            f"CMS shows a generic equivalent covered in {len(generic_plan_ids)} of {len(plan_ids)} matching plan IDs.{generic_note} {count_detail}.",
+        )
+
+    related_status = related_rxcui_coverage_status(
+        prescription, related_rows, plan_ids, rxcui
+    )
+    if related_status:
+        return related_status
+
+    if counts["DataNotProvided"]:
+        data_plan_ids = plan_ids_by_status.get("DataNotProvided", set())
+        if len(data_plan_ids) < len(plan_ids):
+            return make_network_status(
+                "suspect",
+                "CMS Marketplace API",
+                f"CMS did not receive usable formulary data for {len(data_plan_ids)} of {len(plan_ids)} matching plan IDs. {count_detail}.",
+            )
+        return make_network_status(
+            "data_not_provided",
+            "CMS Marketplace API",
+            f"CMS did not receive usable formulary data for {len(data_plan_ids)} of {len(plan_ids)} matching plan IDs. {count_detail}.",
+        )
+
+    if match_note:
+        return make_network_status(
+            "suspect",
+            "CMS Marketplace API",
+            f"{match_note}CMS checked {len(plan_ids)} matching plan IDs and did not mark the selected RxCUI covered. {count_detail}.",
+        )
+
+    return make_network_status(
+        "drug_not_covered",
+        "CMS Marketplace API",
+        f"CMS checked {len(plan_ids)} matching plan IDs and did not mark the RxCUI covered. {count_detail}.",
+    )
+
+
+def check_network_statuses(provider_name, provider_type, npi_results, networks, place):
+    statuses = {}
+    for network in networks:
+        if provider_type == "not_found":
+            statuses[network["id"]] = make_network_status(
+                "not_found",
+                "NPI Registry",
+                "Provider was not found in the NPI Registry.",
+            )
+        elif network.get("marketplace_issuer"):
+            statuses[network["id"]] = check_marketplace_network_status(
+                provider_name, provider_type, npi_results, network, place
+            )
+        else:
+            statuses[network["id"]] = make_network_status(
+                "not_configured",
+                "Provider Finder",
+                "No public lookup is configured for this network.",
+            )
+    return statuses
+
+
+def check_prescription_statuses(prescription, networks, place):
+    statuses = {}
+    for network in networks:
+        if network.get("marketplace_issuer"):
+            statuses[network["id"]] = check_marketplace_drug_status(
+                prescription, network, place
+            )
+        else:
+            statuses[network["id"]] = make_network_status(
+                "not_configured",
+                "Provider Finder",
+                "No public lookup is configured for this network.",
+            )
+    return statuses
+
+
+def build_networks(bcbstx_urls, uhc_urls):
+    networks = []
+    for key, url_info in bcbstx_urls.items():
+        config = BCBSTX_SEARCH_URLS[key]
+        networks.append({
+            "id": f"bcbstx:{key}",
+            "carrier": "BCBSTX",
+            "name": url_info["name"],
+            "url": url_info["url"],
+            "marketplace_issuer": config["marketplace_issuer"],
+            "marketplace_plan_name_contains": config.get("marketplace_plan_name_contains", []),
+            "marketplace_network_url_contains": config.get("marketplace_network_url_contains", ""),
+            "plan_year": 2026,
+        })
+    for key, url_info in uhc_urls.items():
+        config = UHC_SEARCH_URLS[key]
+        networks.append({
+            "id": f"uhc:{key}",
+            "carrier": "UHC",
+            "name": url_info["name"],
+            "url": url_info["url"],
+            "network_code": config["network_code"],
+            "configuration": config["configuration"],
+            "plan_year": config["plan_year"],
+            "marketplace_issuer": config["marketplace_issuer"],
+            "marketplace_network_url_contains": config["marketplace_network_url_contains"],
+        })
+    return networks
+
+
+def parse_doctors(doctor_input, provider_type="auto"):
+    """Parse provider input string."""
+    provider_type = normalize_provider_type(provider_type)
     doctors = []
     for entry in doctor_input.split(","):
         entry = entry.strip()
@@ -545,10 +2858,19 @@ def parse_doctors(doctor_input):
         if "(" in entry and ")" in entry:
             name_part = entry[:entry.index("(")].strip()
             specialty = entry[entry.index("(") + 1:entry.index(")")].strip()
-            doctors.append({"name": name_part, "specialty": specialty})
+            doctors.append({"name": name_part, "specialty": specialty, "provider_type": provider_type})
         else:
-            doctors.append({"name": entry, "specialty": None})
+            doctors.append({"name": entry, "specialty": None, "provider_type": provider_type})
     return doctors
+
+
+def parse_prescriptions(prescription_input):
+    prescriptions = []
+    for entry in prescription_input.split(","):
+        entry = entry.strip()
+        if entry:
+            prescriptions.append(entry)
+    return prescriptions
 
 
 @app.route("/")
@@ -556,40 +2878,95 @@ def index():
     return render_template_string(HTML_TEMPLATE)
 
 
+@app.route("/sources/status")
+def sources_status():
+    cache = load_source_freshness_cache()
+    age_seconds = source_freshness_age_seconds(cache) if cache else None
+    if not cache or age_seconds is None or age_seconds > SOURCE_FRESHNESS_TTL_SECONDS:
+        start_source_refresh()
+    return jsonify(source_freshness_summary(cache))
+
+
+@app.route("/sources/check", methods=["POST"])
+def sources_check():
+    if request.args.get("sync") == "1":
+        with SOURCE_REFRESH_LOCK:
+            if SOURCE_REFRESH_STATE["in_progress"]:
+                return jsonify(source_freshness_summary())
+            SOURCE_REFRESH_STATE["in_progress"] = True
+        cache = None
+        try:
+            cache = check_source_freshness()
+        finally:
+            with SOURCE_REFRESH_LOCK:
+                SOURCE_REFRESH_STATE["in_progress"] = False
+        return jsonify(source_freshness_summary(cache))
+
+    start_source_refresh()
+    return jsonify(source_freshness_summary())
+
+
 @app.route("/search")
 def search():
-    doctors_input = request.args.get("doctors", "")
+    doctors_input = request.args.get("providers", request.args.get("doctors", ""))
+    prescriptions_input = request.args.get("prescriptions", "")
+    provider_type = normalize_provider_type(request.args.get("provider_type", "auto"))
     location = request.args.get("location", "dallas").lower()
     radius = int(request.args.get("radius", 25))
     city = request.args.get("city", "").strip() or None
 
     lat, lon = TEXAS_LOCATIONS.get(location, TEXAS_LOCATIONS["dallas"])
+    marketplace_place = TEXAS_MARKETPLACE_PLACES.get(location, TEXAS_MARKETPLACE_PLACES["dallas"])
 
-    doctors = parse_doctors(doctors_input)
+    doctors = parse_doctors(doctors_input, provider_type=provider_type)
+    prescription_names = parse_prescriptions(prescriptions_input)
+    base_networks = build_networks(generate_bcbstx_urls("", lat, lon, radius), generate_uhc_urls())
 
     results = []
     for doctor in doctors:
-        npi_results = search_npi(
-            doctor["name"], state="TX", city=city, specialty=doctor["specialty"]
+        npi_results, resolved_provider_type = resolve_provider_npi(
+            doctor["name"], state="TX", city=city, specialty=doctor["specialty"],
+            provider_type=doctor["provider_type"]
         )
 
         bcbstx_urls = generate_bcbstx_urls(doctor["name"], lat, lon, radius)
         uhc_urls = generate_uhc_urls()
+        networks = build_networks(bcbstx_urls, uhc_urls)
+        network_statuses = check_network_statuses(
+            doctor["name"], resolved_provider_type, npi_results, networks, marketplace_place
+        )
 
         results.append({
+            "provider": doctor["name"],
             "doctor": doctor["name"],
+            "provider_type": resolved_provider_type,
             "specialty_filter": doctor["specialty"],
             "npi_found": len(npi_results) > 0,
             "npi_count": len(npi_results),
             "npi_results": npi_results[:5],
             "bcbstx_urls": bcbstx_urls,
             "uhc_urls": uhc_urls,
+            "networks": networks,
+            "network_statuses": network_statuses,
         })
 
-    return jsonify(results)
+    prescription_results = []
+    for prescription_name in prescription_names:
+        prescription = resolve_prescription(prescription_name)
+        prescription["network_statuses"] = check_prescription_statuses(
+            prescription, base_networks, marketplace_place
+        )
+        prescription_results.append(prescription)
+
+    return jsonify({
+        "providers": results,
+        "prescriptions": prescription_results,
+        "networks": base_networks,
+        "sources": CARRIER_SOURCE_GROUPS,
+    })
 
 
 if __name__ == "__main__":
-    print("\n  Doctor Network Checker")
+    print("\n  Provider Network Checker")
     print("  Open http://127.0.0.1:5050 in your browser\n")
     app.run(debug=True, port=5050)
