@@ -1292,81 +1292,18 @@ HTML_TEMPLATE = """
         }
         .legend-status {
             align-items: center;
+            border-radius: 5px;
+            cursor: help;
             display: inline-flex;
             font-size: 12px;
             gap: 5px;
+            padding: 2px 4px;
+            position: relative;
         }
-        .answer-card {
+        .legend-status:hover,
+        .legend-status:focus {
             background: white;
-            border: 1px solid var(--line);
-            border-radius: 10px;
-            margin-bottom: 22px;
-            padding: 18px 20px;
-        }
-        .answer-card.lead {
-            border-top: 2px solid #22c55e;
-        }
-        .answer-card.warning {
-            border-top: 2px solid #f59e0b;
-        }
-        .answer-label {
-            align-items: center;
-            color: var(--ink-soft);
-            display: flex;
-            font-size: 10px;
-            font-weight: 800;
-            gap: 7px;
-            letter-spacing: 0.07em;
-            margin-bottom: 6px;
-            text-transform: uppercase;
-        }
-        .answer-dot {
-            background: #22c55e;
-            border-radius: 999px;
-            height: 7px;
-            width: 7px;
-        }
-        .answer-card.warning .answer-dot {
-            background: #f59e0b;
-        }
-        .answer-headline {
-            color: var(--ink);
-            font-size: 24px;
-            font-weight: 650;
-            letter-spacing: -0.02em;
-            line-height: 1.2;
-            margin: 0 0 7px;
-        }
-        .answer-copy {
-            color: var(--ink-muted);
-            font-size: 14px;
-            line-height: 1.55;
-            max-width: 74ch;
-        }
-        .answer-grid {
-            border-top: 1px solid var(--line);
-            margin-top: 16px;
-            padding-top: 14px;
-        }
-        .answer-section-title {
-            color: var(--ink-soft);
-            font-size: 10px;
-            font-weight: 800;
-            letter-spacing: 0.07em;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-        }
-        .answer-list {
-            color: var(--ink);
-            display: grid;
-            font-size: 13px;
-            gap: 7px;
-            line-height: 1.45;
-            margin: 0;
-            padding: 0;
-        }
-        .answer-list li {
-            list-style: none;
+            outline: 1px solid var(--line);
         }
         .network-status-icon {
             flex: 0 0 auto;
@@ -1821,8 +1758,7 @@ HTML_TEMPLATE = """
                 const networks = Array.isArray(data) ? collectNetworks(data) : data.networks;
                 const sourceGroups = Array.isArray(data) ? [] : data.sources || [];
 
-                let html = renderAnswerCard(providerResults, prescriptionResults, networks);
-                html += renderLookupMatrix(providerResults, prescriptionResults, networks);
+                let html = renderLookupMatrix(providerResults, prescriptionResults, networks);
 
                 html += renderProviderDetails(providerResults);
                 html += renderCarrierSourceDetails(sourceGroups);
@@ -2305,79 +2241,6 @@ HTML_TEMPLATE = """
             };
         }
 
-        function findPracticalLead(providerResults, prescriptionResults, networks) {
-            const items = allLookupItems(providerResults, prescriptionResults);
-            const summaries = (networks || [])
-                .map(function(network) {
-                    return summarizeCarrier(network, items);
-                })
-                .filter(function(summary) {
-                    return summary.considered > 0;
-                })
-                .sort(function(a, b) {
-                    if (a.negative !== b.negative) {
-                        return a.negative - b.negative;
-                    }
-                    if (a.caution !== b.caution) {
-                        return a.caution - b.caution;
-                    }
-                    return b.score - a.score;
-                });
-            return summaries.find(function(summary) {
-                return summary.negative === 0 && summary.unknown === 0;
-            }) || null;
-        }
-
-        function renderAnswerCard(providerResults, prescriptionResults, networks) {
-            if (!providerResults.length && !prescriptionResults.length) {
-                return '';
-            }
-
-            const lead = findPracticalLead(providerResults, prescriptionResults, networks);
-            if (!lead) {
-                const items = allLookupItems(providerResults, prescriptionResults);
-                const summaries = (networks || [])
-                    .map(function(network) {
-                        return summarizeCarrier(network, items);
-                    })
-                    .filter(function(summary) {
-                        return summary.considered > 0;
-                    })
-                    .slice(0, 4);
-                let html = '<section class="answer-card warning" aria-label="Practical answer">';
-                html += '<div class="answer-label"><span class="answer-dot"></span>No clean winner</div>';
-                html += '<h2 class="answer-headline">No clean winner yet.</h2>';
-                html += '<div class="answer-copy">Every offered plan has at least one coverage gap, conflict, or missing lookup. Treat the matrix as screening evidence and verify the blockers directly in the carrier portal before quoting coverage.</div>';
-                html += '<div class="answer-grid">';
-                html += '<div class="answer-section-title">Main blockers</div><ul class="answer-list">';
-                for (const summary of summaries) {
-                    const reasons = summary.blockers.length ? summary.blockers.join('; ') : 'no hard blocker, but review items remain';
-                    html += `<li><strong>${escapeHtml(summary.network.name)}</strong>: ${escapeHtml(reasons)}</li>`;
-                }
-                html += '</ul></div></section>';
-                return html;
-            }
-
-            const caveats = lead.caveats.slice(0, 5);
-            let html = '<section class="answer-card lead" aria-label="Practical answer">';
-            html += '<div class="answer-label"><span class="answer-dot"></span>Practical lead</div>';
-            html += `<h2 class="answer-headline">Practical lead: ${escapeHtml(lead.network.name)}</h2>`;
-            html += '<div class="answer-copy">This is the cleanest screened option across the entered providers and prescriptions. It still needs carrier confirmation before Megan quotes it to a client.</div>';
-            html += '<div class="answer-grid">';
-            html += '<div class="answer-section-title">Bring these to the client conversation</div>';
-            if (caveats.length) {
-                html += '<ul class="answer-list">';
-                for (const caveat of caveats) {
-                    html += `<li>${escapeHtml(caveat)}.</li>`;
-                }
-                html += '</ul>';
-            } else {
-                html += '<div class="answer-copy">No review flags on the screened items. Still confirm exact NPI, drug product, tier, and utilization rules in the carrier portal.</div>';
-            }
-            html += '</div></section>';
-            return html;
-        }
-
         function compactText(value, maxLength) {
             const text = String(value || '');
             if (text.length <= maxLength) {
@@ -2629,11 +2492,25 @@ HTML_TEMPLATE = """
             ];
             let html = '<div class="matrix-legend"><span class="matrix-legend-title">Legend</span>';
             for (const [status, label] of statuses) {
-                html += `<span class="legend-status"><span class="matrix-status-icon ${matrixStatusClass(status)}">${networkStatusIcon(status) || '&middot;'}</span>${escapeHtml(label)}</span>`;
+                html += `<span class="legend-status" tabindex="0"${tooltipAttribute(legendStatusTooltip(status))}><span class="matrix-status-icon ${matrixStatusClass(status)}">${networkStatusIcon(status) || '&middot;'}</span>${escapeHtml(label)}</span>`;
             }
-            html += '<span class="legend-status"><strong>CMS</strong> = screening · <strong>Carrier</strong> = final</span>';
+            html += `<span class="legend-status" tabindex="0"${tooltipAttribute('CMS is screening evidence. Carrier portal or formulary should be treated as final when quoting a client.')}><strong>CMS</strong> = screening · <strong>Carrier</strong> = final</span>`;
             html += '</div>';
             return html;
+        }
+
+        function legendStatusTooltip(status) {
+            return {
+                drug_covered: 'Covered for this plan in the screening data. Confirm exact provider, drug, tier, and rules before quoting.',
+                generic_covered: 'The generic is covered. Do not assume the brand is covered unless the carrier confirms it.',
+                review_exact_drug: 'Coverage evidence exists, but the input may be broad. Confirm the exact drug, strength, form, and tier.',
+                other_form_covered: 'A different strength or form is covered. Confirm whether the client can use that version.',
+                related_product_covered: 'A related or combination product is covered. Confirm the exact prescribed product before quoting.',
+                drug_not_covered: 'The plan is available, but this provider or drug was not covered in the checked data.',
+                suspect: 'The data needs manual verification before quoting coverage.',
+                data_not_provided: 'The lookup did not have enough source data. Verify manually.',
+                not_offered: 'This plan is not available for the selected service area, so it should not be treated as a client option.',
+            }[status] || '';
         }
 
         function renderProviderDetails(results) {
