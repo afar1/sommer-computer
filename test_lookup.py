@@ -39,6 +39,7 @@ FACILITY_PAYLOAD = {
             "addresses": [
                 {
                     "address_purpose": "LOCATION",
+                    "address_1": "3500 Gaston Ave",
                     "city": "DALLAS",
                     "state": "TX",
                     "postal_code": "752010000",
@@ -66,6 +67,7 @@ class LookupTests(unittest.TestCase):
         self.assertNotIn("first_name", params)
         self.assertNotIn("last_name", params)
         self.assertEqual(results[0]["name"], "BAYLOR HOSPITAL")
+        self.assertEqual(results[0]["address"], "3500 Gaston Ave, DALLAS, TX 75201")
 
     def test_web_route_auto_resolves_mixed_provider_types(self):
         def fake_search(name, **kwargs):
@@ -114,6 +116,44 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(providers[1]["provider"], "Baylor Scott White")
         self.assertEqual(providers[1]["provider_type"], "facility")
         self.assertEqual(providers[1]["provider_group"], "facility")
+
+    def test_provider_search_route_returns_facility_picker_candidates(self):
+        with patch.object(web_app.requests, "get") as mock_get:
+            mock_get.return_value = FakeResponse(FACILITY_PAYLOAD)
+            client = web_app.app.test_client()
+            response = client.get("/providers/search?q=Baylor&type=facility&city=Dallas")
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["npi"], "1234567890")
+        self.assertEqual(provider["display_name"], "BAYLOR HOSPITAL")
+        self.assertEqual(provider["provider_type"], "facility")
+        self.assertEqual(provider["address"], "3500 Gaston Ave, DALLAS, TX 75201")
+
+    def test_route_uses_exact_facility_selection_npi(self):
+        selection = [{
+            "npi": "9876543210",
+            "name": "BAYLOR HOSPITAL",
+            "display_name": "BAYLOR HOSPITAL",
+            "specialty": "General Acute Care Hospital",
+            "address": "3500 Gaston Ave, DALLAS, TX 75201",
+            "location": "DALLAS, TX 75201",
+            "provider_type": "facility",
+        }]
+
+        with patch.object(web_app, "search_npi", return_value=[]), \
+             patch.object(web_app, "check_network_statuses", return_value={}):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?facilities=BAYLOR+HOSPITAL"
+                "&facility_selections=" + quote(json.dumps(selection))
+            )
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["provider_type"], "facility")
+        self.assertEqual(provider["npi_count"], 1)
+        self.assertEqual(provider["npi_results"][0]["npi"], "9876543210")
 
     def test_facility_search_queries_include_baylor_scott_white_aliases(self):
         queries = web_app.facility_search_queries("bailer scott and white")
@@ -206,7 +246,7 @@ class LookupTests(unittest.TestCase):
         carriers = [group["carrier"] for group in sources]
         self.assertEqual(
             carriers,
-            ["BCBS", "UHC", "Oscar", "Imperial", "Community Health Choice"],
+            ["BCBS", "UHC"],
         )
 
         flat_sources = [
@@ -214,7 +254,7 @@ class LookupTests(unittest.TestCase):
             for group in sources
             for source in group["sources"]
         ]
-        self.assertEqual(len(flat_sources), 18)
+        self.assertEqual(len(flat_sources), 11)
         self.assertTrue(all(source["url"] for source in flat_sources))
         self.assertTrue(all(source["checked_on"] == "2026-05-13" for source in flat_sources))
         self.assertTrue(all(source["validation"].startswith("HTTP 200") for source in flat_sources))
@@ -223,8 +263,6 @@ class LookupTests(unittest.TestCase):
         identifiers = " ".join(source["identifier"] for source in flat_sources)
         self.assertIn("network_id=1000128", identifiers)
         self.assertIn("GPX526TX", identifiers)
-        self.assertIn("networkId=064", identifiers)
-        self.assertIn("formulary-premier-2026.pdf", identifiers)
 
         descriptions = " ".join(source["description"] for source in flat_sources)
         self.assertIn("manual cross-check", descriptions)
@@ -239,8 +277,28 @@ class LookupTests(unittest.TestCase):
         self.assertIn("2027", questions)
         self.assertIn("coordinate-dependent", questions)
         self.assertIn("behavioral directories", questions)
-        self.assertIn("provider/facility type and area", questions)
-        self.assertIn("queried directly versus opened for manual confirmation", questions)
+
+    def test_web_route_filters_networks_and_sources_by_selected_carrier(self):
+        with patch.object(web_app, "search_npi", return_value=[]):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?providers=Unknown+Provider"
+                "&carrier_filter_submitted=true&carriers=bcbstx"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        network_ids = [
+            network["id"]
+            for network in response.json["providers"][0]["networks"]
+        ]
+        self.assertEqual(
+            network_ids,
+            ["bcbstx:blue_advantage_hmo", "bcbstx:my_blue_health"],
+        )
+        self.assertEqual(
+            [group["carrier"] for group in response.json["sources"]],
+            ["BCBS"],
+        )
 
     def test_source_freshness_check_records_metadata(self):
         source_groups = [{
@@ -950,10 +1008,19 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Doctors", html)
         self.assertIn("Facilities", html)
         self.assertIn("Prescriptions", html)
+        self.assertIn("Carriers", html)
+        self.assertIn("Blue Cross and Blue Shield of Texas", html)
+        self.assertIn("UnitedHealthcare", html)
+        self.assertIn('name="carrier_filter_submitted"', html)
+        self.assertIn('name="carriers"', html)
         self.assertIn('id="doctors"', html)
         self.assertIn('id="facilities"', html)
+        self.assertIn('id="facilitySelections"', html)
         self.assertIn('id="prescriptions"', html)
         self.assertIn('id="prescriptionSelections"', html)
+        self.assertIn("Add a facility", html)
+        self.assertIn("/providers/search", html)
+        self.assertIn("choose the exact facility when the address matters", html)
         self.assertIn("Add a prescription", html)
         self.assertIn("/drugs/search", html)
         self.assertIn("Exact RxCUI selection reduces broad-name ambiguity", html)
@@ -1005,9 +1072,10 @@ class LookupTests(unittest.TestCase):
         self.assertIn("network-matrix", html)
         self.assertIn("network-status", html)
         self.assertIn("Dr. John Doe, Maria Garcia", html)
-        self.assertIn("Baylor Scott & White, Houston Methodist Hospital, Kelsey Seybold Clinic", html)
+        self.assertIn("Houston Methodist Hospital", html)
+        self.assertIn("Kelsey Seybold Clinic", html)
         self.assertIn("These search individual NPI records", html)
-        self.assertIn("These search organization NPI records", html)
+        self.assertIn("Search organization NPI records", html)
         self.assertNotIn(">Item</th>", html)
         self.assertNotIn("status-toggle", html)
         self.assertNotIn("providerNetworkStatuses", html)

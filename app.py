@@ -39,6 +39,23 @@ CMS_PUF_LABELS = (
     "Network PUF",
     "Machine-readable URL PUF",
 )
+CARRIER_OPTIONS = (
+    {
+        "value": "bcbstx",
+        "label": "Blue Cross and Blue Shield of Texas",
+        "source_carrier": "BCBS",
+    },
+    {
+        "value": "uhc",
+        "label": "UnitedHealthcare",
+        "source_carrier": "UHC",
+    },
+)
+DEFAULT_CARRIERS = {option["value"] for option in CARRIER_OPTIONS}
+SOURCE_CARRIERS_BY_VALUE = {
+    option["value"]: option["source_carrier"]
+    for option in CARRIER_OPTIONS
+}
 # BCBSTX Provider Finder URL templates
 BCBSTX_SEARCH_URLS = {
     "blue_advantage_hmo": {
@@ -885,7 +902,7 @@ HTML_TEMPLATE = """
         .network-link.uhc:hover {
             background: #fde68a;
         }
-        .prescription-picker {
+        .picker-list {
             align-items: flex-start;
             display: flex;
             flex-direction: column;
@@ -1099,6 +1116,40 @@ HTML_TEMPLATE = """
             font-weight: 800;
             letter-spacing: 0.07em;
             text-transform: uppercase;
+        }
+        .provider-search-wrap {
+            align-items: center;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            display: flex;
+            margin-bottom: 14px;
+            overflow: hidden;
+        }
+        .provider-search-wrap:focus-within {
+            border-color: #2b6cb0;
+            box-shadow: 0 0 0 2px rgba(43, 108, 176, 0.12);
+        }
+        .provider-search-wrap input {
+            border: 0;
+            border-radius: 0;
+            background: white;
+        }
+        .carrier-options {
+            display: grid;
+            gap: 10px;
+        }
+        .carrier-option {
+            align-items: flex-start;
+            color: var(--text);
+            display: flex;
+            font-size: 0.98rem;
+            gap: 10px;
+            line-height: 1.35;
+        }
+        .carrier-option input {
+            accent-color: var(--accent);
+            flex: 0 0 auto;
+            margin-top: 2px;
         }
         .network-matrix {
             width: 100%;
@@ -1850,16 +1901,20 @@ HTML_TEMPLATE = """
 
             <div class="form-group">
                 <label for="facilities">Facility Name(s)</label>
-                <textarea id="facilities" name="facilities" rows="2"
-                          placeholder="e.g., Baylor Scott & White, Houston Methodist Hospital, Kelsey Seybold Clinic"></textarea>
-                <p class="hint">Separate names with commas. These search organization NPI records, so partial facility names can still return multiple matches.</p>
+                <input type="hidden" id="facilities" name="facilities">
+                <input type="hidden" id="facilitySelections" name="facility_selections">
+                <div class="picker-list">
+                    <div id="selectedFacilities" class="selected-rx-list"></div>
+                    <button type="button" id="openFacilityModal" class="secondary-action">Add facility</button>
+                </div>
+                <p class="hint">Search organization NPI records and choose the exact facility when the address matters.</p>
             </div>
 
             <div class="form-group">
                 <label for="prescriptions">Prescription Name(s)</label>
                 <input type="hidden" id="prescriptions" name="prescriptions">
                 <input type="hidden" id="prescriptionSelections" name="prescription_selections">
-                <div class="prescription-picker">
+                <div class="picker-list">
                     <div id="selectedPrescriptions" class="selected-rx-list"></div>
                     <button type="button" id="openPrescriptionModal" class="secondary-action">Add prescription</button>
                 </div>
@@ -1904,6 +1959,22 @@ HTML_TEMPLATE = """
                 <input type="text" id="city" name="city"
                        placeholder="e.g., Dallas (narrows NPI results)">
             </div>
+
+            <div class="form-group">
+                <label>Carriers</label>
+                <input type="hidden" name="carrier_filter_submitted" value="true">
+                <div class="carrier-options">
+                    <label class="carrier-option">
+                        <input type="checkbox" name="carriers" value="bcbstx" checked>
+                        <span>Blue Cross and Blue Shield of Texas</span>
+                    </label>
+                    <label class="carrier-option">
+                        <input type="checkbox" name="carriers" value="uhc" checked>
+                        <span>UnitedHealthcare</span>
+                    </label>
+                </div>
+                <p class="hint">Selected carriers decide which plan columns, provider links, and formulary sources are checked.</p>
+            </div>
         </section>
 
         <section class="intake-block">
@@ -1926,6 +1997,31 @@ HTML_TEMPLATE = """
 
     <div id="sourceStatus"></div>
     <div id="results"></div>
+
+    <div class="modal-backdrop" id="facilityModal" hidden>
+        <div class="prescription-modal" role="dialog" aria-modal="true" aria-labelledby="facilityModalTitle">
+            <div class="modal-header">
+                <div class="modal-title" id="facilityModalTitle">Add a facility</div>
+                <button type="button" class="modal-close" id="closeFacilityModal" aria-label="Close facility picker">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-copy">Search by facility name, then choose the exact location by specialty and address.</p>
+                <div class="provider-search-wrap">
+                    <input type="search" id="facilitySearchInput" placeholder="Enter a facility name" autocomplete="off">
+                    <button type="button" class="drug-clear" id="clearFacilitySearch">Clear</button>
+                </div>
+                <div id="facilitySearchResults" class="drug-option-list"></div>
+                <div class="modal-selected">
+                    <div class="modal-selected-title">Selected facilities</div>
+                    <div id="modalSelectedFacilities" class="selected-rx-list"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="hint">Exact NPI and address are used in the coverage matrix.</span>
+                <button type="button" id="doneFacilityModal" class="secondary-action">Done</button>
+            </div>
+        </div>
+    </div>
 
     <div class="modal-backdrop" id="prescriptionModal" hidden>
         <div class="prescription-modal" role="dialog" aria-modal="true" aria-labelledby="prescriptionModalTitle">
@@ -1991,6 +2087,13 @@ HTML_TEMPLATE = """
         const searchForm = document.getElementById('searchForm');
         const sourceStatusDiv = document.getElementById('sourceStatus');
         const resultsDiv = document.getElementById('results');
+        const facilityInput = document.getElementById('facilities');
+        const facilitySelectionsInput = document.getElementById('facilitySelections');
+        const selectedFacilitiesDiv = document.getElementById('selectedFacilities');
+        const modalSelectedFacilitiesDiv = document.getElementById('modalSelectedFacilities');
+        const facilityModal = document.getElementById('facilityModal');
+        const facilitySearchInput = document.getElementById('facilitySearchInput');
+        const facilitySearchResults = document.getElementById('facilitySearchResults');
         const prescriptionInput = document.getElementById('prescriptions');
         const prescriptionSelectionsInput = document.getElementById('prescriptionSelections');
         const selectedPrescriptionsDiv = document.getElementById('selectedPrescriptions');
@@ -1998,6 +2101,8 @@ HTML_TEMPLATE = """
         const prescriptionModal = document.getElementById('prescriptionModal');
         const drugSearchInput = document.getElementById('drugSearchInput');
         const drugSearchResults = document.getElementById('drugSearchResults');
+        let selectedFacilities = [];
+        let facilitySearchTimer = null;
         let selectedPrescriptions = [];
         let drugSearchTimer = null;
 
@@ -2063,6 +2168,37 @@ HTML_TEMPLATE = """
             document.getElementById('demoScenarios').classList.toggle('is-open');
         });
 
+        document.getElementById('openFacilityModal').addEventListener('click', openFacilityModal);
+        document.getElementById('closeFacilityModal').addEventListener('click', closeFacilityModal);
+        document.getElementById('doneFacilityModal').addEventListener('click', closeFacilityModal);
+        document.getElementById('clearFacilitySearch').addEventListener('click', function() {
+            facilitySearchInput.value = '';
+            renderFacilitySearchResults([]);
+            facilitySearchInput.focus();
+        });
+        facilityModal.addEventListener('click', function(e) {
+            if (e.target === facilityModal) {
+                closeFacilityModal();
+            }
+        });
+        facilitySearchInput.addEventListener('input', function() {
+            window.clearTimeout(facilitySearchTimer);
+            const query = this.value.trim();
+            facilitySearchTimer = window.setTimeout(function() {
+                searchFacilityOptions(query);
+            }, 250);
+        });
+        facilitySearchResults.addEventListener('click', function(e) {
+            const button = e.target.closest('[data-provider-index]');
+            if (!button) {
+                return;
+            }
+            const provider = JSON.parse(button.dataset.provider);
+            addFacilitySelection(provider);
+        });
+        selectedFacilitiesDiv.addEventListener('click', removeFacilityFromClick);
+        modalSelectedFacilitiesDiv.addEventListener('click', removeFacilityFromClick);
+
         document.getElementById('openPrescriptionModal').addEventListener('click', openPrescriptionModal);
         document.getElementById('closePrescriptionModal').addEventListener('click', closePrescriptionModal);
         document.getElementById('donePrescriptionModal').addEventListener('click', closePrescriptionModal);
@@ -2098,6 +2234,7 @@ HTML_TEMPLATE = """
         if (initialSample && sampleScenarios[initialSample]) {
             applyScenario(initialSample);
         }
+        syncFacilitySelectionInputs();
         syncPrescriptionSelectionInputs();
         loadSourceStatus();
 
@@ -2108,12 +2245,129 @@ HTML_TEMPLATE = """
             }
 
             document.getElementById('doctors').value = scenario.doctors || scenario.providers || '';
-            document.getElementById('facilities').value = scenario.facilities || '';
+            setSelectedFacilitiesFromText(scenario.facilities || '');
             setSelectedPrescriptionsFromText(scenario.prescriptions || '');
             document.getElementById('location').value = scenario.location;
             document.getElementById('radius').value = scenario.radius;
             document.getElementById('city').value = scenario.city;
             searchForm.requestSubmit();
+        }
+
+        function openFacilityModal() {
+            facilityModal.hidden = false;
+            renderSelectedFacilities();
+            window.setTimeout(function() {
+                facilitySearchInput.focus();
+            }, 0);
+        }
+
+        function closeFacilityModal() {
+            facilityModal.hidden = true;
+        }
+
+        function setSelectedFacilitiesFromText(value) {
+            selectedFacilities = String(value || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean)
+                .map(item => ({
+                    display_name: item,
+                    name: item,
+                    selection_type: 'text',
+                }));
+            syncFacilitySelectionInputs();
+        }
+
+        function syncFacilitySelectionInputs() {
+            facilityInput.value = selectedFacilities.map(providerDisplayName).join(', ');
+            facilitySelectionsInput.value = JSON.stringify(
+                selectedFacilities.filter(item => item.npi)
+            );
+            renderSelectedFacilities();
+        }
+
+        function providerDisplayName(item) {
+            return item.display_name || item.name || '';
+        }
+
+        function providerMeta(item) {
+            if (item.selection_type === 'text') {
+                return 'Broad facility name';
+            }
+            return [item.specialty, item.address || item.location, item.npi ? `NPI ${item.npi}` : '']
+                .filter(Boolean)
+                .join(' · ');
+        }
+
+        function renderSelectedFacilities() {
+            const html = selectedFacilities.length
+                ? selectedFacilities.map((item, index) => {
+                    return `<div class="selected-rx-chip">
+                        <div>
+                            <div class="selected-rx-name">${escapeHtml(providerDisplayName(item))}</div>
+                            <div class="selected-rx-meta">${escapeHtml(providerMeta(item))}</div>
+                        </div>
+                        <button type="button" class="selected-rx-remove" data-remove-facility="${index}" aria-label="Remove ${escapeHtml(providerDisplayName(item))}">&times;</button>
+                    </div>`;
+                }).join('')
+                : '<div class="selected-rx-empty">No facilities selected yet.</div>';
+            selectedFacilitiesDiv.innerHTML = html;
+            modalSelectedFacilitiesDiv.innerHTML = html;
+        }
+
+        function removeFacilityFromClick(e) {
+            const button = e.target.closest('[data-remove-facility]');
+            if (!button) {
+                return;
+            }
+            selectedFacilities.splice(Number(button.dataset.removeFacility), 1);
+            syncFacilitySelectionInputs();
+        }
+
+        function addFacilitySelection(provider) {
+            if (provider.npi && selectedFacilities.some(item => item.npi === provider.npi)) {
+                return;
+            }
+            selectedFacilities.push(provider);
+            syncFacilitySelectionInputs();
+        }
+
+        async function searchFacilityOptions(query) {
+            if (query.length < 2) {
+                renderFacilitySearchResults([]);
+                return;
+            }
+            facilitySearchResults.innerHTML = '<div class="selected-rx-empty">Searching...</div>';
+            const params = new URLSearchParams({
+                q: query,
+                type: 'facility',
+                city: document.getElementById('city').value || '',
+            });
+            try {
+                const response = await fetch('/providers/search?' + params.toString());
+                const data = await response.json();
+                renderFacilitySearchResults(data.providers || []);
+            } catch (error) {
+                facilitySearchResults.innerHTML = '<div class="selected-rx-empty">Facility lookup failed. Try again.</div>';
+            }
+        }
+
+        function renderFacilitySearchResults(providers) {
+            if (!providers.length) {
+                facilitySearchResults.innerHTML = '<div class="selected-rx-empty">Search for a hospital, clinic, or facility name.</div>';
+                return;
+            }
+            facilitySearchResults.innerHTML = providers.map((provider, index) => {
+                const payload = escapeHtml(JSON.stringify(provider));
+                return `<div class="drug-option">
+                    <div>
+                        <div class="drug-option-name">${escapeHtml(provider.display_name)}</div>
+                        <div class="drug-option-meta">${escapeHtml(provider.specialty || 'Facility')}</div>
+                        <div class="drug-option-meta">${escapeHtml(provider.address || provider.location || '')}</div>
+                    </div>
+                    <button type="button" class="drug-option-add" data-provider-index="${index}" data-provider="${payload}">Add</button>
+                </div>`;
+            }).join('');
         }
 
         function openPrescriptionModal() {
@@ -3139,6 +3393,20 @@ def search_provider_npi(name, state="TX", city=None, specialty=None, limit=10, p
     return results
 
 
+def serialize_provider_candidate(provider, provider_type):
+    return {
+        "npi": str(provider.get("npi", "")),
+        "name": provider.get("name", ""),
+        "display_name": provider.get("name", ""),
+        "credential": provider.get("credential", ""),
+        "specialty": provider.get("specialty", ""),
+        "address": provider.get("address", ""),
+        "location": provider.get("location", ""),
+        "phone": provider.get("phone", ""),
+        "provider_type": provider_type,
+    }
+
+
 def search_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="doctor"):
     """Search the NPI Registry for providers."""
     provider_type = "facility" if provider_type == "facility" else "doctor"
@@ -3203,12 +3471,21 @@ def search_npi(name, state="TX", city=None, specialty=None, limit=10, provider_t
             if provider_type == "doctor":
                 result_name = f"{basic.get('first_name', '')} {basic.get('last_name', '')}".strip()
 
+            address_parts = [
+                practice_addr.get("address_1", ""),
+                practice_addr.get("address_2", ""),
+            ]
+            street_address = " ".join(part for part in address_parts if part).strip()
+            location = f"{practice_addr.get('city', '')}, {practice_addr.get('state', '')} {practice_addr.get('postal_code', '')[:5]}"
+            full_address = ", ".join(part for part in [street_address, location] if part.strip(" ,"))
+
             results.append({
                 "npi": r.get("number", ""),
                 "name": result_name,
                 "credential": basic.get("credential", ""),
                 "specialty": specialty_name,
-                "location": f"{practice_addr.get('city', '')}, {practice_addr.get('state', '')} {practice_addr.get('postal_code', '')[:5]}",
+                "address": full_address,
+                "location": location,
                 "phone": practice_addr.get("telephone_number", ""),
             })
 
@@ -4087,12 +4364,49 @@ def parse_prescription_selections(selection_input):
     ]
 
 
+def parse_provider_selections(selection_input):
+    if not selection_input:
+        return []
+    try:
+        selections = json.loads(selection_input)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(selections, list):
+        return []
+    return [
+        selection for selection in selections
+        if isinstance(selection, dict) and selection.get("npi")
+    ]
+
+
 def provider_result_group(requested_provider_type, resolved_provider_type):
     if requested_provider_type in {"doctor", "facility"}:
         return requested_provider_type
     if resolved_provider_type in {"doctor", "facility"}:
         return resolved_provider_type
     return "doctor"
+
+
+def selected_carriers_from_request(args):
+    if args.get("carrier_filter_submitted") != "true":
+        return set(DEFAULT_CARRIERS)
+    return {
+        carrier
+        for carrier in args.getlist("carriers")
+        if carrier in DEFAULT_CARRIERS
+    }
+
+
+def carrier_source_groups_for_selection(selected_carriers):
+    allowed_source_carriers = {
+        SOURCE_CARRIERS_BY_VALUE[carrier]
+        for carrier in selected_carriers
+        if carrier in SOURCE_CARRIERS_BY_VALUE
+    }
+    return [
+        group for group in CARRIER_SOURCE_GROUPS
+        if group["carrier"] in allowed_source_carriers
+    ]
 
 
 @app.route("/")
@@ -4114,38 +4428,87 @@ def drugs_search():
     return jsonify({"drugs": drugs})
 
 
+@app.route("/providers/search")
+def providers_search():
+    query = request.args.get("q", "").strip()
+    provider_type = normalize_provider_type(request.args.get("type", "facility"))
+    if provider_type == "auto":
+        provider_type = "facility"
+    city = request.args.get("city", "").strip() or None
+    if len(query) < 2:
+        return jsonify({"providers": []})
+    providers = [
+        serialize_provider_candidate(provider, provider_type)
+        for provider in search_provider_npi(
+            query, state="TX", city=city, limit=25, provider_type=provider_type
+        )
+    ]
+    return jsonify({"providers": providers})
+
+
 @app.route("/search")
 def search():
     legacy_providers_input = request.args.get("providers", "")
     doctors_input = request.args.get("doctors", "")
     facilities_input = request.args.get("facilities", "")
+    facility_selections_input = request.args.get("facility_selections", "")
     prescriptions_input = request.args.get("prescriptions", "")
     prescription_selections_input = request.args.get("prescription_selections", "")
     provider_type = normalize_provider_type(request.args.get("provider_type", "auto"))
     location = request.args.get("location", "dallas").lower()
     radius = int(request.args.get("radius", 25))
     city = request.args.get("city", "").strip() or None
+    selected_carriers = selected_carriers_from_request(request.args)
 
     lat, lon = TEXAS_LOCATIONS.get(location, TEXAS_LOCATIONS["dallas"])
     marketplace_place = TEXAS_MARKETPLACE_PLACES.get(location, TEXAS_MARKETPLACE_PLACES["dallas"])
 
     doctors = []
     doctors.extend(parse_doctors(doctors_input, provider_type="doctor"))
-    doctors.extend(parse_doctors(facilities_input, provider_type="facility"))
+    facility_selections = parse_provider_selections(facility_selections_input)
+    selected_facility_names = {
+        (selection.get("display_name") or selection.get("name") or "").strip()
+        for selection in facility_selections
+    }
+    for selection in facility_selections:
+        doctors.append({
+            "name": selection.get("display_name") or selection.get("name"),
+            "specialty": None,
+            "provider_type": "facility",
+            "npi_results": [{
+                "npi": selection.get("npi", ""),
+                "name": selection.get("name", ""),
+                "credential": selection.get("credential", ""),
+                "specialty": selection.get("specialty", ""),
+                "address": selection.get("address", ""),
+                "location": selection.get("location", ""),
+                "phone": selection.get("phone", ""),
+            }],
+        })
+    for facility in parse_doctors(facilities_input, provider_type="facility"):
+        if facility["name"] in selected_facility_names:
+            continue
+        doctors.append(facility)
     doctors.extend(parse_doctors(legacy_providers_input, provider_type=provider_type))
     prescription_selections = parse_prescription_selections(prescription_selections_input)
     prescription_names = parse_prescriptions(prescriptions_input)
-    base_networks = build_networks(generate_bcbstx_urls("", lat, lon, radius), generate_uhc_urls())
+    base_bcbstx_urls = generate_bcbstx_urls("", lat, lon, radius) if "bcbstx" in selected_carriers else {}
+    base_uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
+    base_networks = build_networks(base_bcbstx_urls, base_uhc_urls)
 
     results = []
     for doctor in doctors:
-        npi_results, resolved_provider_type = resolve_provider_npi(
-            doctor["name"], state="TX", city=city, specialty=doctor["specialty"],
-            provider_type=doctor["provider_type"]
-        )
+        if doctor.get("npi_results"):
+            npi_results = doctor["npi_results"]
+            resolved_provider_type = doctor["provider_type"]
+        else:
+            npi_results, resolved_provider_type = resolve_provider_npi(
+                doctor["name"], state="TX", city=city, specialty=doctor["specialty"],
+                provider_type=doctor["provider_type"]
+            )
 
-        bcbstx_urls = generate_bcbstx_urls(doctor["name"], lat, lon, radius)
-        uhc_urls = generate_uhc_urls()
+        bcbstx_urls = generate_bcbstx_urls(doctor["name"], lat, lon, radius) if "bcbstx" in selected_carriers else {}
+        uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
         networks = build_networks(bcbstx_urls, uhc_urls)
         network_statuses = check_network_statuses(
             doctor["name"], resolved_provider_type, npi_results, networks, marketplace_place
@@ -4191,7 +4554,8 @@ def search():
         "providers": results,
         "prescriptions": prescription_results,
         "networks": base_networks,
-        "sources": CARRIER_SOURCE_GROUPS,
+        "sources": carrier_source_groups_for_selection(selected_carriers),
+        "selected_carriers": sorted(selected_carriers),
     })
 
 
