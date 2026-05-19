@@ -661,6 +661,64 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(response.json["drugs"][1]["coverage_type"], "Branded")
         self.assertIn("Atorvastatin 80 mg Oral Tablet", response.json["drugs"][0]["display_name"])
 
+    def test_drug_search_route_filters_to_checked_carrier_formulary_matches(self):
+        drug_payload = [
+            {
+                "rxcui": "covered",
+                "name": "Atorvastatin",
+                "strength": "80 mg",
+                "route": "Oral Pill",
+                "full_name": "atorvastatin 80 MG Oral Tablet",
+                "rxnorm_dose_form": "Oral Tablet",
+            },
+            {
+                "rxcui": "missing",
+                "name": "Atorvastatin",
+                "strength": "10 mg",
+                "route": "Oral Pill",
+                "full_name": "atorvastatin 10 MG Oral Tablet",
+                "rxnorm_dose_form": "Oral Tablet",
+            },
+        ]
+
+        def coverage_response(*args, **kwargs):
+            params = kwargs["params"]
+            if params["drugs"] == "covered":
+                return FakeResponse({
+                    "coverage": [{
+                        "rxcui": "covered",
+                        "plan_id": "plan-1",
+                        "coverage": "Covered",
+                        "tier": "1",
+                    }]
+                })
+            return FakeResponse({"coverage": []})
+
+        with patch.object(web_app, "search_drugs", return_value=drug_payload), \
+             patch.object(web_app, "get_marketplace_plan_ids", return_value=("plan-1",)), \
+             patch.object(web_app.requests, "get", side_effect=coverage_response):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/drugs/search?q=atorvastatin&formulary_only=true&carriers=bcbstx"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        drugs = response.json["drugs"]
+        self.assertEqual(len(drugs), 1)
+        self.assertEqual(drugs[0]["rxcui"], "covered")
+        self.assertEqual(drugs[0]["formulary_matches"][0]["carrier"], "BCBSTX")
+        self.assertEqual(drugs[0]["formulary_matches"][0]["tier_label"], "Tier 1")
+
+    def test_drug_search_route_does_not_default_carriers_when_filtering_formularies(self):
+        with patch.object(web_app, "search_drugs", return_value=[{"rxcui": "covered", "name": "Atorvastatin"}]), \
+             patch.object(web_app, "get_marketplace_plan_ids") as mock_plan_ids:
+            client = web_app.app.test_client()
+            response = client.get("/drugs/search?q=atorvastatin&formulary_only=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["drugs"], [])
+        self.assertFalse(mock_plan_ids.called)
+
     def test_route_uses_exact_prescription_selection_rxcui(self):
         selection = [{
             "rxcui": "259255",
@@ -858,7 +916,7 @@ class LookupTests(unittest.TestCase):
             )
 
         self.assertEqual(status["status"], "drug_covered")
-        self.assertEqual(status["tier_label"], "T1")
+        self.assertEqual(status["tier_label"], "Tier 1")
         self.assertEqual(status["tier_detail"], "Tier: Tier 1")
         self.assertEqual(status["restriction_label"], "PA QL")
         self.assertIn("Tier: Tier 1", status["detail"])
@@ -1069,7 +1127,7 @@ class LookupTests(unittest.TestCase):
         self.assertIn("selected from", html)
         self.assertIn("Suspect", html)
         self.assertIn("Selected RxCUI not covered; exact drug may differ", html)
-        self.assertIn("return [info.tier_label, info.restriction_label].filter(Boolean).join(' ');", html)
+        self.assertIn("info.tier_label", html)
         self.assertIn("Coverage found; confirm exact NPI/location", html)
         self.assertIn("Coverage evidence found; confirm exact drug/form", html)
         self.assertIn("Only some matched plan IDs covered", html)

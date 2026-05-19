@@ -63,6 +63,7 @@ DEFAULT_CARRIERS = {
     for option in CARRIER_OPTIONS
     if option.get("default", True)
 }
+CARRIER_VALUES = {option["value"] for option in CARRIER_OPTIONS}
 SOURCE_CARRIERS_BY_VALUE = {
     option["value"]: option["source_carrier"]
     for option in CARRIER_OPTIONS
@@ -1104,6 +1105,25 @@ HTML_TEMPLATE = """
             color: var(--ink-muted);
             font-size: 12px;
             margin-top: 4px;
+        }
+        .drug-formulary-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 8px;
+        }
+        .drug-formulary-chip {
+            align-items: center;
+            background: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            border-radius: 4px;
+            color: #047857;
+            display: inline-flex;
+            font-size: 10px;
+            font-weight: 800;
+            gap: 4px;
+            line-height: 1.2;
+            padding: 3px 5px;
         }
         .drug-option-add {
             background: white;
@@ -2448,10 +2468,14 @@ HTML_TEMPLATE = """
 
         function prescriptionMeta(item) {
             const source = item.formulary_source && item.formulary_source.label;
+            const matches = item.formulary_matches || [];
+            const matchLabel = matches.length
+                ? 'In formulary: ' + matches.map(match => match.carrier).filter(Boolean).join(', ')
+                : '';
             if (item.selection_type === 'text') {
-                return ['Broad name', source].filter(Boolean).join(' · ');
+                return ['Broad name', matchLabel || source].filter(Boolean).join(' · ');
             }
-            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '', source]
+            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '', matchLabel || source]
                 .filter(Boolean)
                 .join(' · ');
         }
@@ -2527,32 +2551,43 @@ HTML_TEMPLATE = """
                 renderDrugSearchResults([]);
                 return;
             }
-            drugSearchResults.innerHTML = '<div class="selected-rx-empty">Searching...</div>';
+            drugSearchResults.innerHTML = '<div class="selected-rx-empty">Searching checked carrier formularies...</div>';
             try {
-                const params = new URLSearchParams({ q: query });
+                const params = new URLSearchParams({
+                    q: query,
+                    formulary_only: 'true',
+                    location: document.getElementById('location').value || 'dallas',
+                });
+                selectedCarrierValues().forEach(carrier => params.append('carriers', carrier));
                 const source = selectedFormularySource();
                 if (source) {
                     params.set('formulary_source', source.value);
                 }
                 const response = await fetch('/drugs/search?' + params.toString());
                 const data = await response.json();
-                renderDrugSearchResults(data.drugs || []);
+                renderDrugSearchResults(data.drugs || [], data.message || '');
             } catch (error) {
                 drugSearchResults.innerHTML = '<div class="selected-rx-empty">Drug lookup failed. Try again.</div>';
             }
         }
 
-        function renderDrugSearchResults(drugs) {
+        function renderDrugSearchResults(drugs, emptyMessage) {
             if (!drugs.length) {
-                drugSearchResults.innerHTML = '<div class="selected-rx-empty">Search for a generic or brand name.</div>';
+                drugSearchResults.innerHTML = `<div class="selected-rx-empty">${escapeHtml(emptyMessage || 'Search for a generic or brand name.')}</div>`;
                 return;
             }
             drugSearchResults.innerHTML = drugs.map((drug, index) => {
                 const payload = escapeHtml(JSON.stringify(drug));
+                const matchChips = (drug.formulary_matches || []).map(match => {
+                    const tier = [match.tier_label, match.restriction_label].filter(Boolean).join(' ');
+                    const label = [match.carrier, tier].filter(Boolean).join(' · ');
+                    return `<span class="drug-formulary-chip">${escapeHtml(label)}</span>`;
+                }).join('');
                 return `<div class="drug-option">
                     <div>
                         <div class="drug-option-name">${escapeHtml(drug.display_name)}</div>
                         <div class="drug-option-meta">${escapeHtml(drug.coverage_type)} / ${escapeHtml(drug.dose_form || drug.route || 'Drug')}</div>
+                        ${matchChips ? `<div class="drug-formulary-chips">${matchChips}</div>` : ''}
                     </div>
                     <button type="button" class="drug-option-add" data-drug-index="${index}" data-drug="${payload}">Add</button>
                 </div>`;
@@ -4044,7 +4079,7 @@ def summarize_tiers(coverage_rows):
         return "", "", " ".join(restrictions)
     detail = "Tier: " + ", ".join(tiers)
     if len(tiers) == 1:
-        label = tiers[0].replace("Tier ", "T")
+        label = tiers[0]
     else:
         label = "Tiers"
     return label, detail, " ".join(restrictions)
@@ -4372,6 +4407,60 @@ def check_prescription_statuses(prescription, networks, place):
     return statuses
 
 
+def checked_formulary_matches(drug, networks, place):
+    rxcui = str(drug.get("rxcui", "")).strip()
+    if not rxcui:
+        return []
+
+    matches = []
+    for network in networks:
+        if not network.get("marketplace_issuer"):
+            continue
+        try:
+            plan_ids = get_network_plan_ids(network, place)
+        except (requests.RequestException, ValueError):
+            continue
+        if not plan_ids:
+            continue
+
+        coverage_rows = []
+        try:
+            for plan_id_group in chunked(plan_ids, 10):
+                response = requests.get(
+                    f"{CMS_MARKETPLACE_API}/drugs/covered",
+                    params={
+                        "apikey": CMS_MARKETPLACE_API_KEY,
+                        "drugs": rxcui,
+                        "planids": ",".join(plan_id_group),
+                        "year": network["plan_year"],
+                    },
+                    timeout=NETWORK_LOOKUP_TIMEOUT,
+                )
+                response.raise_for_status()
+                data = response.json()
+                coverage_rows.extend(
+                    row for row in data.get("coverage", [])
+                    if str(row.get("rxcui")) == rxcui
+                    and row.get("plan_id") in plan_ids
+                    and row.get("coverage") in {"Covered", "GenericCovered"}
+                )
+        except (requests.RequestException, ValueError):
+            continue
+
+        if not coverage_rows:
+            continue
+        tier_label, tier_detail, restriction_label = summarize_tiers(coverage_rows)
+        matches.append({
+            "carrier": network["carrier"],
+            "plan": network["name"],
+            "network_id": network["id"],
+            "tier_label": tier_label,
+            "tier_detail": tier_detail,
+            "restriction_label": restriction_label,
+        })
+    return matches
+
+
 def build_networks(bcbstx_urls, uhc_urls):
     networks = []
     for key, url_info in bcbstx_urls.items():
@@ -4472,8 +4561,17 @@ def selected_carriers_from_request(args):
     return {
         carrier
         for carrier in args.getlist("carriers")
-        if carrier in DEFAULT_CARRIERS
+        if carrier in CARRIER_VALUES
     }
+
+
+def selected_carriers_from_values(values):
+    selected = {
+        carrier
+        for carrier in values
+        if carrier in CARRIER_VALUES
+    }
+    return selected or set(DEFAULT_CARRIERS)
 
 
 def carrier_source_groups_for_selection(selected_carriers):
@@ -4503,8 +4601,36 @@ def drugs_search():
     query = request.args.get("q", "").strip()
     if len(query) < 2:
         return jsonify({"drugs": []})
-    drugs = [serialize_drug_candidate(drug) for drug in search_drugs(query, limit=25)]
-    return jsonify({"drugs": drugs})
+    formulary_only = request.args.get("formulary_only") == "true"
+    carrier_values = request.args.getlist("carriers")
+    selected_carriers = (
+        selected_carriers_from_values(carrier_values)
+        if carrier_values else set(DEFAULT_CARRIERS)
+    )
+    if formulary_only and not carrier_values:
+        selected_carriers = set()
+    location = request.args.get("location", "dallas").lower()
+    lat, lon = TEXAS_LOCATIONS.get(location, TEXAS_LOCATIONS["dallas"])
+    place = TEXAS_MARKETPLACE_PLACES.get(location, TEXAS_MARKETPLACE_PLACES["dallas"])
+    bcbstx_urls = generate_bcbstx_urls("", lat, lon, 25) if "bcbstx" in selected_carriers else {}
+    uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
+    networks = build_networks(bcbstx_urls, uhc_urls)
+
+    drugs = []
+    for drug in search_drugs(query, limit=25):
+        candidate = serialize_drug_candidate(drug)
+        candidate["formulary_matches"] = (
+            checked_formulary_matches(drug, networks, place)
+            if formulary_only else []
+        )
+        if formulary_only and not candidate["formulary_matches"]:
+            continue
+        drugs.append(candidate)
+
+    message = ""
+    if formulary_only and not drugs:
+        message = "No checked carrier formulary match found for this prescription."
+    return jsonify({"drugs": drugs, "message": message})
 
 
 @app.route("/providers/search")
