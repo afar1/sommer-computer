@@ -1140,16 +1140,20 @@ HTML_TEMPLATE = """
         }
         .carrier-option {
             align-items: flex-start;
-            color: var(--text);
+            color: var(--ink-muted);
             display: flex;
             font-size: 0.98rem;
             gap: 10px;
             line-height: 1.35;
+            margin-bottom: 0;
         }
-        .carrier-option input {
-            accent-color: var(--accent);
+        .carrier-option input[type="checkbox"] {
+            accent-color: #2b6cb0;
             flex: 0 0 auto;
+            height: 16px;
             margin-top: 2px;
+            padding: 0;
+            width: 16px;
         }
         .network-matrix {
             width: 100%;
