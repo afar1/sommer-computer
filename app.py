@@ -49,9 +49,20 @@ CARRIER_OPTIONS = (
         "value": "uhc",
         "label": "UnitedHealthcare",
         "source_carrier": "UHC",
+        "default": True,
+    },
+    {
+        "value": "oscar",
+        "label": "Oscar",
+        "source_carrier": "Oscar",
+        "default": False,
     },
 )
-DEFAULT_CARRIERS = {option["value"] for option in CARRIER_OPTIONS}
+DEFAULT_CARRIERS = {
+    option["value"]
+    for option in CARRIER_OPTIONS
+    if option.get("default", True)
+}
 SOURCE_CARRIERS_BY_VALUE = {
     option["value"]: option["source_carrier"]
     for option in CARRIER_OPTIONS
@@ -1976,6 +1987,10 @@ HTML_TEMPLATE = """
                         <input type="checkbox" name="carriers" value="uhc" checked>
                         <span>UnitedHealthcare</span>
                     </label>
+                    <label class="carrier-option">
+                        <input type="checkbox" name="carriers" value="oscar">
+                        <span>Oscar</span>
+                    </label>
                 </div>
                 <p class="hint">Selected carriers decide which plan columns, provider links, and formulary sources are checked.</p>
             </div>
@@ -2035,6 +2050,11 @@ HTML_TEMPLATE = """
             </div>
             <div class="modal-body">
                 <p class="modal-copy">Search by generic or brand name, then choose the exact option when you know it.</p>
+                <div class="form-group">
+                    <label for="formularySource">Formulary source</label>
+                    <select id="formularySource"></select>
+                    <p class="hint">Drug matching still uses CMS autocomplete; this selects the carrier formulary context for final confirmation.</p>
+                </div>
                 <div class="drug-search-wrap">
                     <input type="search" id="drugSearchInput" placeholder="Enter a prescription name" autocomplete="off">
                     <button type="button" class="drug-clear" id="clearDrugSearch">Clear</button>
@@ -2088,6 +2108,14 @@ HTML_TEMPLATE = """
             },
         };
 
+        const formularySources = [
+            { value: 'bcbstx:4-tier', carrier: 'bcbstx', label: 'Blue Cross and Blue Shield of Texas · 4-Tier', source_name: '4-Tier' },
+            { value: 'bcbstx:6-tier', carrier: 'bcbstx', label: 'Blue Cross and Blue Shield of Texas · 6-Tier', source_name: '6-Tier' },
+            { value: 'uhc:individual-exchange-hmo', carrier: 'uhc', label: 'UnitedHealthcare · Individual Exchange HMO', source_name: 'Individual Exchange HMO' },
+            { value: 'oscar:4-tier', carrier: 'oscar', label: 'Oscar · 4-Tier', source_name: '4-Tier' },
+            { value: 'oscar:6-tier', carrier: 'oscar', label: 'Oscar · 6-Tier', source_name: '6-Tier' },
+        ];
+
         const searchForm = document.getElementById('searchForm');
         const sourceStatusDiv = document.getElementById('sourceStatus');
         const resultsDiv = document.getElementById('results');
@@ -2103,8 +2131,10 @@ HTML_TEMPLATE = """
         const selectedPrescriptionsDiv = document.getElementById('selectedPrescriptions');
         const modalSelectedPrescriptionsDiv = document.getElementById('modalSelectedPrescriptions');
         const prescriptionModal = document.getElementById('prescriptionModal');
+        const formularySourceSelect = document.getElementById('formularySource');
         const drugSearchInput = document.getElementById('drugSearchInput');
         const drugSearchResults = document.getElementById('drugSearchResults');
+        const carrierInputs = Array.from(document.querySelectorAll('input[name="carriers"]'));
         let selectedFacilities = [];
         let facilitySearchTimer = null;
         let selectedPrescriptions = [];
@@ -2233,6 +2263,9 @@ HTML_TEMPLATE = """
         });
         selectedPrescriptionsDiv.addEventListener('click', removePrescriptionFromClick);
         modalSelectedPrescriptionsDiv.addEventListener('click', removePrescriptionFromClick);
+        carrierInputs.forEach(function(input) {
+            input.addEventListener('change', updateFormularySourceOptions);
+        });
 
         const initialSample = new URLSearchParams(window.location.search).get('sample');
         if (initialSample && sampleScenarios[initialSample]) {
@@ -2240,6 +2273,7 @@ HTML_TEMPLATE = """
         }
         syncFacilitySelectionInputs();
         syncPrescriptionSelectionInputs();
+        updateFormularySourceOptions();
         loadSourceStatus();
 
         function applyScenario(sampleId) {
@@ -2375,6 +2409,7 @@ HTML_TEMPLATE = """
         }
 
         function openPrescriptionModal() {
+            updateFormularySourceOptions();
             prescriptionModal.hidden = false;
             renderSelectedPrescriptions();
             window.setTimeout(function() {
@@ -2412,10 +2447,11 @@ HTML_TEMPLATE = """
         }
 
         function prescriptionMeta(item) {
+            const source = item.formulary_source && item.formulary_source.label;
             if (item.selection_type === 'text') {
-                return 'Broad name';
+                return ['Broad name', source].filter(Boolean).join(' · ');
             }
-            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '']
+            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '', source]
                 .filter(Boolean)
                 .join(' · ');
         }
@@ -2449,8 +2485,41 @@ HTML_TEMPLATE = """
             if (drug.rxcui && selectedPrescriptions.some(item => item.rxcui === drug.rxcui)) {
                 return;
             }
+            drug.formulary_source = selectedFormularySource();
             selectedPrescriptions.push(drug);
             syncPrescriptionSelectionInputs();
+        }
+
+        function selectedCarrierValues() {
+            return carrierInputs
+                .filter(input => input.checked)
+                .map(input => input.value);
+        }
+
+        function availableFormularySources() {
+            const carriers = selectedCarrierValues();
+            return formularySources.filter(source => carriers.includes(source.carrier));
+        }
+
+        function selectedFormularySource() {
+            const selectedValue = formularySourceSelect.value;
+            return availableFormularySources().find(source => source.value === selectedValue) || null;
+        }
+
+        function updateFormularySourceOptions() {
+            const previousValue = formularySourceSelect.value;
+            const sources = availableFormularySources();
+            if (!sources.length) {
+                formularySourceSelect.innerHTML = '<option value="">Select a carrier to choose a formulary</option>';
+                return;
+            }
+            formularySourceSelect.innerHTML = sources.map(source => {
+                const selected = source.value === previousValue ? ' selected' : '';
+                return `<option value="${escapeHtml(source.value)}"${selected}>${escapeHtml(source.label)}</option>`;
+            }).join('');
+            if (!sources.some(source => source.value === previousValue)) {
+                formularySourceSelect.value = sources[0].value;
+            }
         }
 
         async function searchDrugOptions(query) {
@@ -2460,7 +2529,12 @@ HTML_TEMPLATE = """
             }
             drugSearchResults.innerHTML = '<div class="selected-rx-empty">Searching...</div>';
             try {
-                const response = await fetch('/drugs/search?q=' + encodeURIComponent(query));
+                const params = new URLSearchParams({ q: query });
+                const source = selectedFormularySource();
+                if (source) {
+                    params.set('formulary_source', source.value);
+                }
+                const response = await fetch('/drugs/search?' + params.toString());
                 const data = await response.json();
                 renderDrugSearchResults(data.drugs || []);
             } catch (error) {
@@ -3685,6 +3759,7 @@ def resolve_selected_prescription(selection):
         "selected_is_combination": drug_is_combination_match(display_name, selected),
         "drug_match_warning": "",
         "selected_from_picker": True,
+        "formulary_source": selection.get("formulary_source") or {},
     }
 
 

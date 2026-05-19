@@ -985,6 +985,32 @@ class LookupTests(unittest.TestCase):
             "drug_covered",
         )
 
+    def test_route_preserves_selected_prescription_formulary_source(self):
+        selection = [{
+            "rxcui": "197805",
+            "display_name": "Ibuprofen 400 mg Oral Pill",
+            "name": "Ibuprofen",
+            "formulary_source": {
+                "value": "bcbstx:4-tier",
+                "label": "Blue Cross and Blue Shield of Texas · 4-Tier",
+            },
+        }]
+
+        with patch.object(web_app, "search_npi", return_value=[]), \
+             patch.object(web_app, "check_prescription_statuses", return_value={}):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?prescription_selections=" + quote(json.dumps(selection))
+            )
+
+        self.assertEqual(response.status_code, 200)
+        prescription = response.json["prescriptions"][0]
+        self.assertEqual(prescription["rxcui"], "197805")
+        self.assertEqual(
+            prescription["formulary_source"]["label"],
+            "Blue Cross and Blue Shield of Texas · 4-Tier",
+        )
+
     def test_home_page_has_network_status_matrix_markup(self):
         client = web_app.app.test_client()
         response = client.get("/")
@@ -1011,6 +1037,13 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Carriers", html)
         self.assertIn("Blue Cross and Blue Shield of Texas", html)
         self.assertIn("UnitedHealthcare", html)
+        self.assertIn("Oscar", html)
+        self.assertIn("Formulary source", html)
+        self.assertIn("Blue Cross and Blue Shield of Texas · 4-Tier", html)
+        self.assertIn("Blue Cross and Blue Shield of Texas · 6-Tier", html)
+        self.assertIn("UnitedHealthcare · Individual Exchange HMO", html)
+        self.assertIn("Oscar · 4-Tier", html)
+        self.assertIn("Oscar · 6-Tier", html)
         self.assertIn('name="carrier_filter_submitted"', html)
         self.assertIn('name="carriers"', html)
         self.assertIn('id="doctors"', html)
