@@ -2151,6 +2151,8 @@ HTML_TEMPLATE = """
         let facilitySearchTimer = null;
         let selectedPrescriptions = [];
         let drugSearchTimer = null;
+        let drugSearchRequest = null;
+        let drugSearchSequence = 0;
 
         searchForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -2250,6 +2252,10 @@ HTML_TEMPLATE = """
         document.getElementById('donePrescriptionModal').addEventListener('click', closePrescriptionModal);
         document.getElementById('clearDrugSearch').addEventListener('click', function() {
             drugSearchInput.value = '';
+            if (drugSearchRequest) {
+                drugSearchRequest.abort();
+                drugSearchRequest = null;
+            }
             renderDrugSearchResults([]);
             drugSearchInput.focus();
         });
@@ -2505,10 +2511,16 @@ HTML_TEMPLATE = """
         }
 
         async function searchDrugOptions(query) {
+            const sequence = ++drugSearchSequence;
+            if (drugSearchRequest) {
+                drugSearchRequest.abort();
+                drugSearchRequest = null;
+            }
             if (query.length < 2) {
                 renderDrugSearchResults([]);
                 return;
             }
+            drugSearchRequest = new AbortController();
             drugSearchResults.innerHTML = '<div class="selected-rx-empty">Searching checked carrier formularies...</div>';
             try {
                 const params = new URLSearchParams({
@@ -2517,11 +2529,23 @@ HTML_TEMPLATE = """
                     location: document.getElementById('location').value || 'dallas',
                 });
                 selectedCarrierValues().forEach(carrier => params.append('carriers', carrier));
-                const response = await fetch('/drugs/search?' + params.toString());
+                const response = await fetch('/drugs/search?' + params.toString(), {
+                    signal: drugSearchRequest.signal,
+                });
                 const data = await response.json();
+                if (sequence !== drugSearchSequence) {
+                    return;
+                }
                 renderDrugSearchResults(data.drugs || [], data.message || '');
             } catch (error) {
+                if (error.name === 'AbortError') {
+                    return;
+                }
                 drugSearchResults.innerHTML = '<div class="selected-rx-empty">Drug lookup failed. Try again.</div>';
+            } finally {
+                if (sequence === drugSearchSequence) {
+                    drugSearchRequest = null;
+                }
             }
         }
 
@@ -2533,9 +2557,7 @@ HTML_TEMPLATE = """
             drugSearchResults.innerHTML = drugs.map((drug, index) => {
                 const payload = escapeHtml(JSON.stringify(drug));
                 const matchChips = (drug.formulary_matches || []).map(match => {
-                    const tier = [match.tier_label, match.restriction_label].filter(Boolean).join(' ');
-                    const label = [match.carrier, tier].filter(Boolean).join(' · ');
-                    return `<span class="drug-formulary-chip">${escapeHtml(label)}</span>`;
+                    return `<span class="drug-formulary-chip">${escapeHtml(match.carrier)}</span>`;
                 }).join('');
                 return `<div class="drug-option">
                     <div>
@@ -4487,12 +4509,16 @@ def check_prescription_statuses(prescription, networks, place):
     return statuses
 
 
-def checked_formulary_matches(drug, networks, place):
-    rxcui = str(drug.get("rxcui", "")).strip()
-    if not rxcui:
-        return []
+def checked_formulary_matches_for_drugs(drugs, networks, place):
+    rxcuis = [
+        str(drug.get("rxcui", "")).strip()
+        for drug in drugs
+        if str(drug.get("rxcui", "")).strip()
+    ]
+    matches_by_rxcui = {rxcui: [] for rxcui in rxcuis}
+    if not rxcuis:
+        return matches_by_rxcui
 
-    matches = []
     for network in networks:
         if not network.get("marketplace_issuer"):
             continue
@@ -4506,44 +4532,44 @@ def checked_formulary_matches(drug, networks, place):
         coverage_rows = []
         try:
             for plan_id_group in chunked(plan_ids, 10):
-                response = requests.get(
-                    f"{CMS_MARKETPLACE_API}/drugs/covered",
-                    params={
-                        "apikey": CMS_MARKETPLACE_API_KEY,
-                        "drugs": rxcui,
-                        "planids": ",".join(plan_id_group),
-                        "year": network["plan_year"],
-                    },
-                    timeout=NETWORK_LOOKUP_TIMEOUT,
-                )
-                response.raise_for_status()
-                data = response.json()
-                coverage_rows.extend(
-                    row for row in data.get("coverage", [])
-                    if str(row.get("rxcui")) == rxcui
-                    and row.get("plan_id") in plan_ids
-                    and row.get("coverage") in {"Covered", "GenericCovered"}
-                )
+                for rxcui_group in chunked(rxcuis, 10):
+                    response = requests.get(
+                        f"{CMS_MARKETPLACE_API}/drugs/covered",
+                        params={
+                            "apikey": CMS_MARKETPLACE_API_KEY,
+                            "drugs": ",".join(rxcui_group),
+                            "planids": ",".join(plan_id_group),
+                            "year": network["plan_year"],
+                        },
+                        timeout=NETWORK_LOOKUP_TIMEOUT,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    coverage_rows.extend(
+                        row for row in data.get("coverage", [])
+                        if str(row.get("rxcui")) in rxcui_group
+                        and row.get("plan_id") in plan_ids
+                        and row.get("coverage") in {"Covered", "GenericCovered"}
+                    )
         except (requests.RequestException, ValueError):
             continue
 
-        if not coverage_rows:
-            continue
-        tier_label, tier_detail, restriction_label = summarize_tiers(coverage_rows)
-        if not tier_label:
-            tier_match = lookup_formulary_tier({"drug_results": [drug]}, network)
-            tier_label = tier_match.get("tier_label", "")
-            tier_detail = tier_match.get("tier_detail", "")
-            restriction_label = tier_match.get("restriction_label", "")
-        matches.append({
-            "carrier": network["carrier"],
-            "plan": network["name"],
-            "network_id": network["id"],
-            "tier_label": tier_label,
-            "tier_detail": tier_detail,
-            "restriction_label": restriction_label,
-        })
-    return matches
+        for rxcui in rxcuis:
+            matching_rows = [
+                row for row in coverage_rows
+                if str(row.get("rxcui")) == rxcui
+            ]
+            if not matching_rows:
+                continue
+            matches_by_rxcui[rxcui].append({
+                "carrier": network["carrier"],
+                "plan": network["name"],
+                "network_id": network["id"],
+                "tier_label": "",
+                "tier_detail": "",
+                "restriction_label": "",
+            })
+    return matches_by_rxcui
 
 
 def build_networks(bcbstx_urls, uhc_urls):
@@ -4701,13 +4727,16 @@ def drugs_search():
     uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
     networks = build_networks(bcbstx_urls, uhc_urls)
 
+    raw_drugs = search_drugs(query, limit=10)
+    matches_by_rxcui = (
+        checked_formulary_matches_for_drugs(raw_drugs, networks, place)
+        if formulary_only else {}
+    )
+
     drugs = []
-    for drug in search_drugs(query, limit=25):
+    for drug in raw_drugs:
         candidate = serialize_drug_candidate(drug)
-        candidate["formulary_matches"] = (
-            checked_formulary_matches(drug, networks, place)
-            if formulary_only else []
-        )
+        candidate["formulary_matches"] = matches_by_rxcui.get(candidate["rxcui"], [])
         if formulary_only and not candidate["formulary_matches"]:
             continue
         drugs.append(candidate)

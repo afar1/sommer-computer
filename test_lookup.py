@@ -683,20 +683,20 @@ class LookupTests(unittest.TestCase):
 
         def coverage_response(*args, **kwargs):
             params = kwargs["params"]
-            if params["drugs"] == "covered":
-                return FakeResponse({
-                    "coverage": [{
-                        "rxcui": "covered",
-                        "plan_id": "plan-1",
-                        "coverage": "Covered",
-                        "tier": "1",
-                    }]
-                })
-            return FakeResponse({"coverage": []})
+            self.assertEqual(params["drugs"], "covered,missing")
+            return FakeResponse({
+                "coverage": [{
+                    "rxcui": "covered",
+                    "plan_id": "plan-1",
+                    "coverage": "Covered",
+                    "tier": "1",
+                }]
+            })
 
         with patch.object(web_app, "search_drugs", return_value=drug_payload), \
              patch.object(web_app, "get_marketplace_plan_ids", return_value=("plan-1",)), \
-             patch.object(web_app.requests, "get", side_effect=coverage_response):
+             patch.object(web_app.requests, "get", side_effect=coverage_response), \
+             patch.object(web_app, "formulary_pdf_text") as mock_formulary_pdf_text:
             client = web_app.app.test_client()
             response = client.get(
                 "/drugs/search?q=atorvastatin&formulary_only=true&carriers=bcbstx"
@@ -707,7 +707,8 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(len(drugs), 1)
         self.assertEqual(drugs[0]["rxcui"], "covered")
         self.assertEqual(drugs[0]["formulary_matches"][0]["carrier"], "BCBSTX")
-        self.assertEqual(drugs[0]["formulary_matches"][0]["tier_label"], "Tier 1")
+        self.assertEqual(drugs[0]["formulary_matches"][0]["tier_label"], "")
+        self.assertFalse(mock_formulary_pdf_text.called)
 
     def test_drug_search_route_does_not_default_carriers_when_filtering_formularies(self):
         with patch.object(web_app, "search_drugs", return_value=[{"rxcui": "covered", "name": "Atorvastatin"}]), \
