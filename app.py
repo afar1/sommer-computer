@@ -598,83 +598,177 @@ HTML_TEMPLATE = """
         * {
             box-sizing: border-box;
         }
+        :root {
+            --ink: #20242a;
+            --ink-muted: #59616d;
+            --ink-soft: #858c96;
+            --line: #e6e9ee;
+            --line-soft: #f0f2f5;
+            --bg: #f8f8f7;
+            --panel: #ffffff;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 900px;
+            max-width: 2200px;
             margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
+            padding: 24px;
+            background: var(--bg);
+            color: var(--ink);
         }
         h1 {
-            color: #1f2937;
+            color: var(--ink);
+            font-size: 25px;
+            letter-spacing: -0.02em;
+            margin: 0;
+        }
+        .case-header {
+            align-items: flex-end;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            gap: 18px;
+            justify-content: space-between;
+            margin-bottom: 18px;
+            padding-bottom: 14px;
+        }
+        .eyebrow {
+            color: var(--ink-soft);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
             margin-bottom: 5px;
+            text-transform: uppercase;
         }
         .subtitle {
-            color: #666;
-            margin-bottom: 30px;
+            color: var(--ink-muted);
+            font-size: 12px;
+            margin: 5px 0 0;
+        }
+        .header-actions {
+            align-items: center;
+            color: var(--ink-soft);
+            display: flex;
+            flex-wrap: wrap;
+            font-size: 12px;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        .sample-toggle {
+            background: transparent;
+            border: 0;
+            color: var(--ink-muted);
+            font-size: 12px;
+            font-weight: 650;
+            padding: 0;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            width: auto;
+        }
+        .sample-toggle:hover {
+            background: transparent;
+            color: var(--ink);
         }
         .search-form {
-            background: white;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
+            background: var(--line);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            display: grid;
+            gap: 1px;
+            grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.8fr) minmax(220px, 0.65fr);
+            margin-bottom: 22px;
+            overflow: hidden;
+            padding: 0;
+        }
+        .intake-block {
+            background: var(--panel);
+            padding: 14px;
+        }
+        .intake-block-title {
+            color: var(--ink-soft);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.07em;
+            margin-bottom: 10px;
+            text-transform: uppercase;
         }
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 12px;
+        }
+        .form-group:last-child {
+            margin-bottom: 0;
         }
         label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             font-weight: 600;
-            color: #333;
+            color: var(--ink-muted);
+            font-size: 12px;
         }
-        input, select {
+        input, select, textarea {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 16px;
+            padding: 10px 11px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            font-size: 14px;
             transition: border-color 0.2s;
+            background: #fbfbfb;
+            color: var(--ink);
+            font-family: inherit;
         }
-        input:focus, select:focus {
+        textarea {
+            min-height: 42px;
+            resize: vertical;
+        }
+        input:focus, select:focus, textarea:focus {
             outline: none;
-            border-color: #2563eb;
+            border-color: #111827;
+            background: white;
         }
         .form-row {
             display: flex;
-            gap: 15px;
+            gap: 10px;
         }
         .form-row .form-group {
             flex: 1;
         }
         button {
-            background: #2563eb;
+            background: #20242a;
             color: white;
-            padding: 14px 28px;
+            padding: 10px 14px;
             border: none;
-            border-radius: 8px;
-            font-size: 16px;
+            border-radius: 6px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             width: 100%;
             transition: background 0.2s;
         }
         button:hover {
-            background: #1d4ed8;
+            background: #111827;
         }
         button:disabled {
-            background: #93c5fd;
+            background: #9ca3af;
             cursor: not-allowed;
         }
+        .run-copy {
+            color: var(--ink-muted);
+            font-size: 12px;
+            line-height: 1.5;
+            margin: 0 0 12px;
+        }
         .demo-scenarios {
-            border-top: 1px solid #e5e7eb;
-            margin-top: 4px;
-            padding-top: 16px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            display: none;
+            margin: -8px 0 22px;
+            padding: 12px 14px;
+        }
+        .demo-scenarios.is-open {
+            display: block;
         }
         .demo-title {
-            color: #374151;
-            font-size: 14px;
+            color: var(--ink-muted);
+            font-size: 12px;
             font-weight: 600;
             margin-bottom: 10px;
         }
@@ -696,7 +790,7 @@ HTML_TEMPLATE = """
             width: auto;
         }
         .demo-random {
-            background: #111827;
+            background: var(--ink);
             color: white;
         }
         .demo-random:hover {
@@ -704,7 +798,7 @@ HTML_TEMPLATE = """
         }
         .demo-link {
             background: #f3f4f6;
-            color: #1f2937;
+            color: var(--ink);
         }
         .demo-link:hover {
             background: #e5e7eb;
@@ -794,12 +888,13 @@ HTML_TEMPLATE = """
         .network-matrix {
             width: 100%;
             border-collapse: collapse;
+            min-width: 1160px;
             table-layout: fixed;
         }
         .network-matrix-wrap {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid var(--line);
+            border-radius: 10px;
             margin-bottom: 24px;
             overflow: hidden;
         }
@@ -807,14 +902,42 @@ HTML_TEMPLATE = """
             overflow-x: auto;
         }
         .network-matrix-title {
-            padding: 14px 20px 3px;
-            font-size: 16px;
-            font-weight: 600;
-            color: #1f2937;
+            align-items: baseline;
+            color: var(--ink-soft);
+            display: flex;
+            font-size: 10px;
+            font-weight: 800;
+            gap: 12px;
+            letter-spacing: 0.07em;
+            padding: 16px 20px 10px;
+            text-transform: uppercase;
+        }
+        .network-matrix-title::after {
+            background: var(--line);
+            content: "";
+            flex: 1;
+            height: 1px;
+        }
+        .matrix-title-copy {
+            color: var(--ink-muted);
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+        .matrix-actions {
+            color: var(--ink-soft);
+            display: inline-flex;
+            font-size: 12px;
+            font-weight: 650;
+            gap: 14px;
+            letter-spacing: 0;
+            margin-left: auto;
+            text-transform: none;
         }
         .network-matrix-note {
             padding: 0 20px 10px;
-            color: #6b7280;
+            color: var(--ink-muted);
             font-size: 12px;
         }
         .network-matrix th,
@@ -825,9 +948,9 @@ HTML_TEMPLATE = """
             vertical-align: middle;
         }
         .network-matrix th {
-            background: #f8fafc;
-            color: #374151;
-            font-size: 12px;
+            background: #f3f6f8;
+            color: var(--ink);
+            font-size: 13px;
             font-weight: 600;
             line-height: 1.2;
         }
@@ -840,10 +963,15 @@ HTML_TEMPLATE = """
         .network-matrix th:not(:first-child),
         .network-matrix td:not(:first-child) {
             border-left: 1px solid #eef2f7;
-            min-width: 132px;
+            min-width: 150px;
         }
-        .network-matrix tbody tr.lookup-row:hover td:not(:first-child) {
-            background: #f8fafc;
+        .network-matrix th.row-total-header,
+        .network-matrix td.row-total-cell {
+            min-width: 110px;
+            width: 110px;
+        }
+        .network-matrix tbody tr.lookup-row:hover td:not(:first-child):not(.row-total-cell) {
+            background: #fbfcfd;
         }
         .network-matrix [data-column-index]:not([data-column-index="0"]).column-hover {
             background: #f0f9ff;
@@ -852,24 +980,35 @@ HTML_TEMPLATE = """
             background: #e0f2fe;
         }
         .network-matrix td.network-cell:hover {
-            background: #eff6ff;
-            outline: 2px solid #93c5fd;
-            outline-offset: -2px;
+            background: #fbfcfd;
         }
         .lookup-section-row td {
-            background: #f9fafb;
-            padding: 12px 20px;
+            background: #f3f6f8;
+            padding: 10px 20px;
+        }
+        .lookup-section-row .section-count {
+            color: var(--ink-soft);
+            float: right;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0;
+            text-transform: none;
         }
         .lookup-section-title {
-            color: #111827;
+            color: var(--ink);
+            display: inline;
             font-size: 13px;
-            font-weight: 750;
+            font-weight: 800;
+            letter-spacing: 0.06em;
             margin-bottom: 2px;
+            text-transform: uppercase;
         }
         .lookup-section-copy {
-            color: #6b7280;
-            font-size: 12px;
+            color: var(--ink-muted);
+            display: inline;
+            font-size: 13px;
             line-height: 1.35;
+            margin-left: 8px;
         }
         .lookup-item-cell {
             position: relative;
@@ -884,9 +1023,9 @@ HTML_TEMPLATE = """
             gap: 8px;
         }
         .lookup-item-heading {
-            color: #1f2937;
-            font-size: 13px;
-            font-weight: 650;
+            color: var(--ink);
+            font-size: 14px;
+            font-weight: 750;
             line-height: 1.25;
             min-width: 0;
         }
@@ -942,6 +1081,293 @@ HTML_TEMPLATE = """
             line-height: 1;
             white-space: nowrap;
         }
+        .carrier-header {
+            text-align: left;
+        }
+        .carrier-name {
+            color: var(--ink);
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 7px;
+        }
+        .carrier-meta,
+        .carrier-counts {
+            color: var(--ink-soft);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.45;
+        }
+        .carrier-covered {
+            color: #166534;
+            font-size: 17px;
+            font-weight: 800;
+        }
+        .carrier-caution {
+            color: #92400e;
+        }
+        .carrier-blocking {
+            color: #991b1b;
+        }
+        .plan-arrow {
+            color: var(--ink-soft);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .network-cell {
+            background: #fbfcfd;
+            padding: 4px;
+        }
+        .matrix-status-card {
+            border: 1px solid var(--line);
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            justify-content: space-between;
+            min-height: 58px;
+            padding: 7px 8px;
+            text-align: left;
+        }
+        .matrix-status-card.in {
+            background: #e7f8eb;
+            border-color: #9bd8aa;
+            color: #064e3b;
+        }
+        .matrix-status-card.generic-covered {
+            background: #ddf7ee;
+            border-color: #8bd3bd;
+            color: #065f46;
+        }
+        .matrix-status-card.partial-coverage,
+        .matrix-status-card.partial-match,
+        .matrix-status-card.data-not-provided,
+        .matrix-status-card.lookup-error,
+        .matrix-status-card.suspect {
+            background: #fff3d6;
+            border-color: #e7c46b;
+            color: #78350f;
+        }
+        .matrix-status-card.review-exact-drug,
+        .matrix-status-card.other-form-covered {
+            background: #e7f8eb;
+            border-color: #9bd8aa;
+            color: #065f46;
+        }
+        .matrix-status-card.related-product-covered {
+            background: #d9f2fb;
+            border-color: #8fcde6;
+            color: #075985;
+        }
+        .matrix-status-card.out,
+        .matrix-status-card.not-found,
+        .matrix-status-card.no-record {
+            background: #fde8e8;
+            border-color: #f5a3a3;
+            color: #991b1b;
+        }
+        .matrix-status-card.not-offered,
+        .matrix-status-card.not-configured,
+        .matrix-status-card.no-result {
+            background: #f3f6f8;
+            border-color: #d8dee5;
+            color: #7b8490;
+        }
+        .matrix-status-top {
+            align-items: center;
+            display: flex;
+            gap: 5px;
+        }
+        .matrix-status-icon {
+            align-items: center;
+            border-radius: 4px;
+            color: white;
+            display: inline-flex;
+            font-size: 10px;
+            font-weight: 900;
+            height: 16px;
+            justify-content: center;
+            line-height: 1;
+            width: 16px;
+        }
+        .matrix-status-card.in .matrix-status-icon,
+        .matrix-status-card.generic-covered .matrix-status-icon,
+        .matrix-status-icon.in,
+        .matrix-status-icon.generic-covered {
+            background: #15936a;
+        }
+        .matrix-status-card.partial-coverage .matrix-status-icon,
+        .matrix-status-card.partial-match .matrix-status-icon,
+        .matrix-status-card.data-not-provided .matrix-status-icon,
+        .matrix-status-card.lookup-error .matrix-status-icon,
+        .matrix-status-card.suspect .matrix-status-icon,
+        .matrix-status-icon.partial-coverage,
+        .matrix-status-icon.partial-match,
+        .matrix-status-icon.data-not-provided,
+        .matrix-status-icon.lookup-error,
+        .matrix-status-icon.suspect {
+            background: #c98a18;
+        }
+        .matrix-status-card.review-exact-drug .matrix-status-icon,
+        .matrix-status-card.other-form-covered .matrix-status-icon,
+        .matrix-status-icon.review-exact-drug,
+        .matrix-status-icon.other-form-covered {
+            background: #15936a;
+        }
+        .matrix-status-card.related-product-covered .matrix-status-icon,
+        .matrix-status-icon.related-product-covered {
+            background: #159ac7;
+        }
+        .matrix-status-card.out .matrix-status-icon,
+        .matrix-status-card.not-found .matrix-status-icon,
+        .matrix-status-card.no-record .matrix-status-icon,
+        .matrix-status-icon.out,
+        .matrix-status-icon.not-found,
+        .matrix-status-icon.no-record {
+            background: #cc3d3d;
+        }
+        .matrix-status-card.not-offered .matrix-status-icon,
+        .matrix-status-card.not-configured .matrix-status-icon,
+        .matrix-status-card.no-result .matrix-status-icon,
+        .matrix-status-icon.not-offered,
+        .matrix-status-icon.not-configured,
+        .matrix-status-icon.no-result {
+            background: #aab3bd;
+        }
+        .matrix-status-label {
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.15;
+            white-space: normal;
+        }
+        .matrix-source {
+            border: 1px solid currentColor;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 800;
+            margin-left: auto;
+            opacity: 0.45;
+            padding: 0 3px;
+        }
+        .matrix-status-detail {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 800;
+            opacity: 0.82;
+        }
+        .row-total {
+            color: var(--ink-soft);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .row-total-covered {
+            color: #166534;
+            font-size: 20px;
+            font-weight: 900;
+        }
+        .row-total-caution {
+            color: #92400e;
+        }
+        .matrix-legend {
+            align-items: center;
+            background: #f3f6f8;
+            border-top: 1px solid var(--line);
+            color: var(--ink-muted);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 12px 20px;
+        }
+        .matrix-legend-title {
+            color: var(--ink-soft);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+        .legend-status {
+            align-items: center;
+            display: inline-flex;
+            font-size: 12px;
+            gap: 5px;
+        }
+        .answer-card {
+            background: white;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            margin-bottom: 22px;
+            padding: 18px 20px;
+        }
+        .answer-card.lead {
+            border-top: 2px solid #22c55e;
+        }
+        .answer-card.warning {
+            border-top: 2px solid #f59e0b;
+        }
+        .answer-label {
+            align-items: center;
+            color: var(--ink-soft);
+            display: flex;
+            font-size: 10px;
+            font-weight: 800;
+            gap: 7px;
+            letter-spacing: 0.07em;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+        .answer-dot {
+            background: #22c55e;
+            border-radius: 999px;
+            height: 7px;
+            width: 7px;
+        }
+        .answer-card.warning .answer-dot {
+            background: #f59e0b;
+        }
+        .answer-headline {
+            color: var(--ink);
+            font-size: 24px;
+            font-weight: 650;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+            margin: 0 0 7px;
+        }
+        .answer-copy {
+            color: var(--ink-muted);
+            font-size: 14px;
+            line-height: 1.55;
+            max-width: 74ch;
+        }
+        .answer-grid {
+            border-top: 1px solid var(--line);
+            margin-top: 16px;
+            padding-top: 14px;
+        }
+        .answer-section-title {
+            color: var(--ink-soft);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.07em;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        .answer-list {
+            color: var(--ink);
+            display: grid;
+            font-size: 13px;
+            gap: 7px;
+            line-height: 1.45;
+            margin: 0;
+            padding: 0;
+        }
+        .answer-list li {
+            list-style: none;
+        }
         .network-status-icon {
             flex: 0 0 auto;
             font-size: 14px;
@@ -961,6 +1387,12 @@ HTML_TEMPLATE = """
         .network-status.generic-covered {
             background: #ccfbf1;
             color: #0f766e;
+        }
+        .network-status.review-exact-drug,
+        .network-status.other-form-covered,
+        .network-status.related-product-covered {
+            background: #fef3c7;
+            color: #92400e;
         }
         .network-status.likely-in,
         .network-status.likely-covered {
@@ -1049,59 +1481,11 @@ HTML_TEMPLATE = """
             left: 0;
             transform: none;
         }
-        .confidence-legend {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            display: grid;
-            gap: 10px;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            margin-bottom: 24px;
-            padding: 16px 20px;
-        }
-        .legend-item {
-            align-items: flex-start;
-            display: flex;
-            gap: 10px;
-        }
-        .legend-swatch {
-            border-radius: 999px;
-            flex: 0 0 12px;
-            height: 12px;
-            margin-top: 4px;
-            width: 12px;
-        }
-        .legend-swatch.verified {
-            background: #22c55e;
-        }
-        .legend-swatch.likely {
-            background: #86efac;
-        }
-        .legend-swatch.partial {
-            background: #f59e0b;
-        }
-        .legend-swatch.suspect {
-            background: #ef4444;
-        }
-        .legend-swatch.not-offered {
-            background: #38bdf8;
-        }
-        .legend-title {
-            color: #1f2937;
-            font-size: 13px;
-            font-weight: 700;
-            margin-bottom: 2px;
-        }
-        .legend-copy {
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.35;
-        }
         .source-freshness {
             align-items: center;
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid var(--line);
+            border-radius: 10px;
             display: flex;
             gap: 16px;
             justify-content: space-between;
@@ -1121,8 +1505,8 @@ HTML_TEMPLATE = """
         }
         .provider-details {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid var(--line);
+            border-radius: 10px;
             margin-bottom: 30px;
             overflow: hidden;
         }
@@ -1141,8 +1525,8 @@ HTML_TEMPLATE = """
         }
         .source-details {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border: 1px solid var(--line);
+            border-radius: 10px;
             margin-bottom: 30px;
             overflow: hidden;
         }
@@ -1256,8 +1640,13 @@ HTML_TEMPLATE = """
             body {
                 padding: 12px;
             }
+            .case-header,
+            .header-actions {
+                align-items: flex-start;
+                flex-direction: column;
+            }
             .search-form {
-                padding: 16px;
+                grid-template-columns: 1fr;
             }
             .form-row {
                 flex-direction: column;
@@ -1274,8 +1663,8 @@ HTML_TEMPLATE = """
             }
             .network-matrix th:first-child,
             .network-matrix td:first-child {
-                min-width: 180px;
-                width: 180px;
+                min-width: 220px;
+                width: 220px;
             }
             .source-freshness {
                 align-items: flex-start;
@@ -1285,25 +1674,38 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>Provider Network Checker</h1>
-    <p class="subtitle">Search providers and prescriptions against public Marketplace network data</p>
+    <header class="case-header">
+        <div>
+            <div class="eyebrow">Case · Provider Network Checker</div>
+            <h1>New client coverage check</h1>
+            <p class="subtitle">Answer first, evidence underneath, carrier portals for final confirmation.</p>
+        </div>
+        <div class="header-actions">
+            <span>Megan · broker view</span>
+            <button type="button" class="sample-toggle" id="sampleToggle">Sample cases</button>
+        </div>
+    </header>
 
-    <div class="search-form">
-        <form id="searchForm">
+    <form id="searchForm" class="search-form">
+        <section class="intake-block">
+            <div class="intake-block-title">Client meds & providers</div>
             <div class="form-group">
                 <label for="doctors">Provider Name(s)</label>
-                <input type="text" id="doctors" name="doctors"
-                       placeholder="e.g., Dr. John Doe, Baylor Hospital, Kelsey Seybold Clinic">
+                <textarea id="doctors" name="doctors" rows="2"
+                          placeholder="e.g., Dr. John Doe, Baylor Hospital, Kelsey Seybold Clinic"></textarea>
                 <p class="hint">Separate names with commas. Doctors and facilities can be mixed; each row is tagged Doctor, Facility, or Not found.</p>
             </div>
 
             <div class="form-group">
                 <label for="prescriptions">Prescription Name(s)</label>
-                <input type="text" id="prescriptions" name="prescriptions"
-                       placeholder="e.g., Ozempic, Levothyroxine, Ibuprofen">
+                <textarea id="prescriptions" name="prescriptions" rows="2"
+                          placeholder="e.g., Ozempic, Levothyroxine, Ibuprofen"></textarea>
                 <p class="hint">Separate multiple names with commas. Marketplace drug coverage is matched by RxCUI, so exact strength/form can matter.</p>
             </div>
+        </section>
 
+        <section class="intake-block">
+            <div class="intake-block-title">Service area</div>
             <div class="form-row">
                 <div class="form-group">
                     <label for="location">Location</label>
@@ -1339,20 +1741,24 @@ HTML_TEMPLATE = """
                 <input type="text" id="city" name="city"
                        placeholder="e.g., Dallas (narrows NPI results)">
             </div>
+        </section>
 
-            <button type="submit" id="searchBtn">Search</button>
+        <section class="intake-block">
+            <div class="intake-block-title">Run check</div>
+            <p class="run-copy">Search CMS Marketplace data, then use carrier links for the exact NPI, product, tier, and final client quote.</p>
+            <button type="submit" id="searchBtn">Run check</button>
+        </section>
+    </form>
 
-            <div class="demo-scenarios">
-                <div class="demo-title">Try a mixed provider + prescription sample</div>
-                <div class="demo-actions">
-                    <button type="button" class="demo-random" id="randomDemoBtn">Random mixed sample</button>
-                    <a href="?sample=dallas-specialty" class="demo-link" data-sample="dallas-specialty">Dallas doctor + hospital</a>
-                    <a href="?sample=houston-mix" class="demo-link" data-sample="houston-mix">Houston clinic + Rx</a>
-                    <a href="?sample=austin-mix" class="demo-link" data-sample="austin-mix">Austin facilities + Rx</a>
-                    <a href="?sample=san-antonio-wide" class="demo-link" data-sample="san-antonio-wide">San Antonio wide + Rx</a>
-                </div>
-            </div>
-        </form>
+    <div class="demo-scenarios" id="demoScenarios">
+        <div class="demo-title">Try a mixed provider + prescription sample</div>
+        <div class="demo-actions">
+            <button type="button" class="demo-random" id="randomDemoBtn">Random mixed sample</button>
+            <a href="?sample=dallas-specialty" class="demo-link" data-sample="dallas-specialty">Dallas doctor + hospital</a>
+            <a href="?sample=houston-mix" class="demo-link" data-sample="houston-mix">Houston clinic + Rx</a>
+            <a href="?sample=austin-mix" class="demo-link" data-sample="austin-mix">Austin facilities + Rx</a>
+            <a href="?sample=san-antonio-wide" class="demo-link" data-sample="san-antonio-wide">San Antonio wide + Rx</a>
+        </div>
     </div>
 
     <div id="sourceStatus"></div>
@@ -1415,7 +1821,7 @@ HTML_TEMPLATE = """
                 const networks = Array.isArray(data) ? collectNetworks(data) : data.networks;
                 const sourceGroups = Array.isArray(data) ? [] : data.sources || [];
 
-                let html = renderConfidenceLegend(providerResults, prescriptionResults);
+                let html = renderAnswerCard(providerResults, prescriptionResults, networks);
                 html += renderLookupMatrix(providerResults, prescriptionResults, networks);
 
                 html += renderProviderDetails(providerResults);
@@ -1427,7 +1833,7 @@ HTML_TEMPLATE = """
             }
 
             btn.disabled = false;
-            btn.textContent = 'Search';
+            btn.textContent = 'Run check';
         });
 
         resultsDiv.addEventListener('pointerover', function(e) {
@@ -1451,6 +1857,10 @@ HTML_TEMPLATE = """
             const sampleIds = Object.keys(sampleScenarios);
             const sampleId = sampleIds[Math.floor(Math.random() * sampleIds.length)];
             applyScenario(sampleId);
+        });
+
+        document.getElementById('sampleToggle').addEventListener('click', function() {
+            document.getElementById('demoScenarios').classList.toggle('is-open');
         });
 
         const initialSample = new URLSearchParams(window.location.search).get('sample');
@@ -1586,6 +1996,9 @@ HTML_TEMPLATE = """
                 out: 'out',
                 drug_covered: 'in',
                 generic_covered: 'generic-covered',
+                review_exact_drug: 'review-exact-drug',
+                other_form_covered: 'other-form-covered',
+                related_product_covered: 'related-product-covered',
                 likely_in: 'likely-in',
                 likely_covered: 'likely-covered',
                 partial_coverage: 'partial-coverage',
@@ -1603,12 +2016,19 @@ HTML_TEMPLATE = """
             }[status] || 'no-result';
         }
 
+        function matrixStatusClass(status) {
+            return networkStatusClass(status).replaceAll('_', '-');
+        }
+
         function networkStatusIcon(status) {
             if (status === 'in') {
                 return '&check;';
             }
             if (status === 'drug_covered' || status === 'generic_covered') {
                 return '&check;';
+            }
+            if (status === 'review_exact_drug' || status === 'other_form_covered' || status === 'related_product_covered') {
+                return '!';
             }
             if (status === 'likely_in' || status === 'likely_covered') {
                 return '&check;';
@@ -1633,16 +2053,25 @@ HTML_TEMPLATE = """
 
         function networkStatusLabel(status) {
             if (status === 'in') {
-                return 'In';
+                return 'Covered';
             }
             if (status === 'out') {
-                return 'Out';
+                return 'Not covered';
             }
             if (status === 'drug_covered') {
                 return 'Covered';
             }
             if (status === 'generic_covered') {
-                return 'Generic';
+                return 'Generic covered';
+            }
+            if (status === 'review_exact_drug') {
+                return 'Review exact drug';
+            }
+            if (status === 'other_form_covered') {
+                return 'Other form covered';
+            }
+            if (status === 'related_product_covered') {
+                return 'Related product covered';
             }
             if (status === 'likely_in') {
                 return 'Likely';
@@ -1651,7 +2080,7 @@ HTML_TEMPLATE = """
                 return 'Likely';
             }
             if (status === 'partial_coverage' || status === 'partial_match') {
-                return 'Partial';
+                return 'Partial coverage';
             }
             if (status === 'drug_not_covered') {
                 return 'Not covered';
@@ -1697,6 +2126,51 @@ HTML_TEMPLATE = """
             return html;
         }
 
+        function renderMatrixStatus(statusInfo) {
+            const info = statusInfo || { status: 'no_result', detail: 'No lookup result', source: 'No result' };
+            const status = info.status || 'no_result';
+            const label = networkStatusLabel(status);
+            const source = (info.source || '').toLowerCase().includes('cms') ? 'CMS' : '';
+            const detail = matrixStatusDetail(info);
+            let html = `<div class="matrix-status-card ${matrixStatusClass(status)}">`;
+            html += '<div class="matrix-status-top">';
+            html += `<span class="matrix-status-icon">${networkStatusIcon(status) || '&middot;'}</span>`;
+            html += `<span class="matrix-status-label">${escapeHtml(label)}</span>`;
+            if (source) {
+                html += `<span class="matrix-source">${source}</span>`;
+            }
+            html += '</div>';
+            if (detail) {
+                html += `<div class="matrix-status-detail">${escapeHtml(detail)}</div>`;
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function matrixStatusDetail(statusInfo) {
+            const info = statusInfo || {};
+            const status = info.status || 'no_result';
+            if (status === 'generic_covered') {
+                return 'generic';
+            }
+            if (status === 'review_exact_drug') {
+                return 'verify exact';
+            }
+            if (status === 'other_form_covered') {
+                return 'other form';
+            }
+            if (status === 'related_product_covered') {
+                return 'related';
+            }
+            if (status === 'partial_coverage' || status === 'partial_match') {
+                return 'partial';
+            }
+            if (status === 'suspect') {
+                return 'verify';
+            }
+            return '';
+        }
+
         function networkStatusTooltip(statusInfo) {
             const info = statusInfo || { status: 'no_result', detail: 'No lookup result', source: 'No result' };
             const status = info.status || 'no_result';
@@ -1723,6 +2197,15 @@ HTML_TEMPLATE = """
                 }
                 return 'CMS data needs direct confirmation';
             }
+            if (status === 'review_exact_drug') {
+                return 'Coverage evidence found; confirm exact drug/form';
+            }
+            if (status === 'other_form_covered') {
+                return 'A different matched strength or form is covered';
+            }
+            if (status === 'related_product_covered') {
+                return 'A related combination product is covered';
+            }
             if (status === 'likely_covered') {
                 return 'Coverage found; confirm exact RxCUI';
             }
@@ -1744,18 +2227,154 @@ HTML_TEMPLATE = """
             return '';
         }
 
-        function renderConfidenceLegend(providerResults, prescriptionResults) {
+        function statusFamily(status) {
+            if (status === 'in' || status === 'drug_covered' || status === 'generic_covered') {
+                return 'positive';
+            }
+            if (status === 'likely_in' || status === 'likely_covered' || status === 'review_exact_drug' || status === 'other_form_covered' || status === 'related_product_covered' || status === 'partial_coverage' || status === 'partial_match') {
+                return 'caution';
+            }
+            if (status === 'out' || status === 'drug_not_covered' || status === 'not_found' || status === 'suspect') {
+                return 'negative';
+            }
+            if (status === 'not_offered' || status === 'not_configured' || status === 'no_result') {
+                return 'na';
+            }
+            return 'unknown';
+        }
+
+        function allLookupItems(providerResults, prescriptionResults) {
+            return []
+                .concat((providerResults || []).map(function(result) {
+                    return {
+                        type: 'provider',
+                        name: result.provider,
+                        statuses: result.network_statuses || {},
+                    };
+                }))
+                .concat((prescriptionResults || []).map(function(result) {
+                    return {
+                        type: 'rx',
+                        name: result.prescription,
+                        statuses: result.network_statuses || {},
+                    };
+                }));
+        }
+
+        function summarizeCarrier(network, items) {
+            let positive = 0;
+            let caution = 0;
+            let negative = 0;
+            let unknown = 0;
+            let considered = 0;
+            const blockers = [];
+            const caveats = [];
+
+            for (const item of items) {
+                const info = item.statuses[network.id] || { status: 'no_result' };
+                const status = info.status || 'no_result';
+                const family = statusFamily(status);
+                if (family === 'na') {
+                    continue;
+                }
+                considered += 1;
+                if (family === 'positive') {
+                    positive += 1;
+                } else if (family === 'caution') {
+                    caution += 1;
+                    caveats.push(`${item.name}: ${networkStatusLabel(status)}`);
+                } else if (family === 'negative') {
+                    negative += 1;
+                    blockers.push(`${item.name}: ${networkStatusLabel(status)}`);
+                } else {
+                    unknown += 1;
+                    caveats.push(`${item.name}: ${networkStatusLabel(status)}`);
+                }
+            }
+
+            return {
+                network: network,
+                positive: positive,
+                caution: caution,
+                negative: negative,
+                unknown: unknown,
+                considered: considered,
+                blockers: blockers,
+                caveats: caveats,
+                score: positive * 2 + caution - negative * 3 - unknown,
+            };
+        }
+
+        function findPracticalLead(providerResults, prescriptionResults, networks) {
+            const items = allLookupItems(providerResults, prescriptionResults);
+            const summaries = (networks || [])
+                .map(function(network) {
+                    return summarizeCarrier(network, items);
+                })
+                .filter(function(summary) {
+                    return summary.considered > 0;
+                })
+                .sort(function(a, b) {
+                    if (a.negative !== b.negative) {
+                        return a.negative - b.negative;
+                    }
+                    if (a.caution !== b.caution) {
+                        return a.caution - b.caution;
+                    }
+                    return b.score - a.score;
+                });
+            return summaries.find(function(summary) {
+                return summary.negative === 0 && summary.unknown === 0;
+            }) || null;
+        }
+
+        function renderAnswerCard(providerResults, prescriptionResults, networks) {
             if (!providerResults.length && !prescriptionResults.length) {
                 return '';
             }
 
-            let html = '<div class="confidence-legend" aria-label="Data confidence legend">';
-            html += '<div class="legend-item"><span class="legend-swatch verified"></span><div><div class="legend-title">Verified</div><div class="legend-copy">Exact NPI or RxCUI, fresh CMS data, all matched plan IDs agree.</div></div></div>';
-            html += '<div class="legend-item"><span class="legend-swatch likely"></span><div><div class="legend-title">Likely</div><div class="legend-copy">CMS found coverage, but exact NPI/location or RxCUI should be confirmed.</div></div></div>';
-            html += '<div class="legend-item"><span class="legend-swatch partial"></span><div><div class="legend-title">Partial coverage</div><div class="legend-copy">Only some matched plan IDs show coverage.</div></div></div>';
-            html += '<div class="legend-item"><span class="legend-swatch suspect"></span><div><div class="legend-title">Suspect</div><div class="legend-copy">Missing, stale, errored, or carrier-conflicting data; verify directly.</div></div></div>';
-            html += '<div class="legend-item"><span class="legend-swatch not-offered"></span><div><div class="legend-title">Not offered</div><div class="legend-copy">CMS found no matching plans for that network in this location.</div></div></div>';
-            html += '</div>';
+            const lead = findPracticalLead(providerResults, prescriptionResults, networks);
+            if (!lead) {
+                const items = allLookupItems(providerResults, prescriptionResults);
+                const summaries = (networks || [])
+                    .map(function(network) {
+                        return summarizeCarrier(network, items);
+                    })
+                    .filter(function(summary) {
+                        return summary.considered > 0;
+                    })
+                    .slice(0, 4);
+                let html = '<section class="answer-card warning" aria-label="Practical answer">';
+                html += '<div class="answer-label"><span class="answer-dot"></span>No clean winner</div>';
+                html += '<h2 class="answer-headline">No clean winner yet.</h2>';
+                html += '<div class="answer-copy">Every offered plan has at least one coverage gap, conflict, or missing lookup. Treat the matrix as screening evidence and verify the blockers directly in the carrier portal before quoting coverage.</div>';
+                html += '<div class="answer-grid">';
+                html += '<div class="answer-section-title">Main blockers</div><ul class="answer-list">';
+                for (const summary of summaries) {
+                    const reasons = summary.blockers.length ? summary.blockers.join('; ') : 'no hard blocker, but review items remain';
+                    html += `<li><strong>${escapeHtml(summary.network.name)}</strong>: ${escapeHtml(reasons)}</li>`;
+                }
+                html += '</ul></div></section>';
+                return html;
+            }
+
+            const caveats = lead.caveats.slice(0, 5);
+            let html = '<section class="answer-card lead" aria-label="Practical answer">';
+            html += '<div class="answer-label"><span class="answer-dot"></span>Practical lead</div>';
+            html += `<h2 class="answer-headline">Practical lead: ${escapeHtml(lead.network.name)}</h2>`;
+            html += '<div class="answer-copy">This is the cleanest screened option across the entered providers and prescriptions. It still needs carrier confirmation before Megan quotes it to a client.</div>';
+            html += '<div class="answer-grid">';
+            html += '<div class="answer-section-title">Bring these to the client conversation</div>';
+            if (caveats.length) {
+                html += '<ul class="answer-list">';
+                for (const caveat of caveats) {
+                    html += `<li>${escapeHtml(caveat)}.</li>`;
+                }
+                html += '</ul>';
+            } else {
+                html += '<div class="answer-copy">No review flags on the screened items. Still confirm exact NPI, drug product, tier, and utilization rules in the carrier portal.</div>';
+            }
+            html += '</div></section>';
             return html;
         }
 
@@ -1813,8 +2432,15 @@ HTML_TEMPLATE = """
             }
             const matchCount = result.drug_match_count || 0;
             const selected = compactText(`${result.drug_name || result.prescription} | RxCUI ${result.rxcui}`, 68);
-            const countLabel = matchCount > 1 ? ` | ${matchCount} matches` : '';
-            return escapeHtml(selected + countLabel);
+            const selectedLine = escapeHtml(selected + (matchCount > 1 ? ` | ${matchCount} CMS matches` : ''));
+            const matchNames = (result.drug_results || [])
+                .slice(0, 4)
+                .map(drugMatchName)
+                .filter(Boolean);
+            if (matchCount <= 1 || !matchNames.length) {
+                return selectedLine;
+            }
+            return `${selectedLine}<br>${escapeHtml('Top matches: ' + matchNames.join('; '))}`;
         }
 
         function collectNetworks(results) {
@@ -1839,21 +2465,23 @@ HTML_TEMPLATE = """
                 return '';
             }
 
+            const items = allLookupItems(providerResults, prescriptionResults);
             let html = '<div class="network-matrix-wrap">';
-            html += '<div class="network-matrix-title">Results</div>';
-            html += '<div class="network-matrix-note">CMS checks by matched NPI or RxCUI. Hover any status for detail.</div>';
+            html += '<div class="network-matrix-title">Evidence · coverage matrix <span class="matrix-title-copy">every provider × every plan, with source authority</span><span class="matrix-actions"><span>Hide not offered</span><span>Side-by-side ↗</span></span></div>';
             html += '<div class="network-matrix-scroll"><table class="network-matrix">';
-            html += '<thead><tr><th data-column-index="0" aria-label="Lookup item"></th>';
+            html += '<thead><tr><th data-column-index="0" aria-label="Lookup item"><span class="plan-arrow">Plan →</span></th>';
             for (const [index, network] of networks.entries()) {
-                html += `<th data-column-index="${index + 1}">${escapeHtml(network.name)}</th>`;
+                html += renderCarrierHeader(network, summarizeCarrier(network, items), index + 1);
             }
+            html += '<th class="row-total-header" data-column-index="total"><span class="plan-arrow">Row total</span></th>';
             html += '</tr></thead><tbody>';
 
             if (providerResults.length) {
                 html += renderLookupSection(
                     'Providers',
-                    'CMS provider coverage by matched NPI. Confirm exact NPI/location.',
-                    networks.length + 1
+                    'Coverage by NPI match against carrier rosters',
+                    networks.length + 2,
+                    providerResults.length
                 );
                 for (const result of providerResults) {
                     html += renderProviderLookupRow(result, networks);
@@ -1863,22 +2491,51 @@ HTML_TEMPLATE = """
             if (prescriptionResults.length) {
                 html += renderLookupSection(
                     'Prescriptions',
-                    'CMS formulary coverage by RxCUI. Confirm exact strength/form.',
-                    networks.length + 1
+                    'Coverage by RxCUI · CMS = screening, carrier formulary = final',
+                    networks.length + 2,
+                    prescriptionResults.length
                 );
                 for (const result of prescriptionResults) {
                     html += renderPrescriptionLookupRow(result, networks);
                 }
             }
 
-            html += '</tbody></table></div></div>';
+            html += '</tbody></table></div>';
+            html += renderMatrixLegend();
+            html += '</div>';
             return html;
         }
 
-        function renderLookupSection(title, copy, colspan) {
+        function renderCarrierHeader(network, summary, columnIndex) {
+            const issuer = network.carrier || network.marketplace_issuer || '';
+            const planType = network.name.includes('HMO') ? 'HMO' : network.name.includes('EPO') || network.name.includes('My Blue') ? 'EPO' : 'Exchange';
+            let html = `<th class="carrier-header" data-column-index="${columnIndex}">`;
+            html += `<div class="carrier-name">${escapeHtml(network.name)}</div>`;
+            html += `<div class="carrier-meta">${escapeHtml(issuer)} · ${escapeHtml(planType)}</div>`;
+            if (!summary.considered) {
+                html += '<div class="carrier-counts">not offered</div>';
+            } else {
+                html += `<div class="carrier-counts"><span class="carrier-covered">${summary.positive}</span> /${summary.considered} covered</div>`;
+                const parts = [];
+                if (summary.caution) {
+                    parts.push(`<span class="carrier-caution">${summary.caution} caution</span>`);
+                }
+                if (summary.negative) {
+                    parts.push(`<span class="carrier-blocking">${summary.negative} blocking</span>`);
+                }
+                if (parts.length) {
+                    html += `<div class="carrier-counts">${parts.join(' · ')}</div>`;
+                }
+            }
+            html += '</th>';
+            return html;
+        }
+
+        function renderLookupSection(title, copy, colspan, count) {
             let html = `<tr class="lookup-section-row"><td colspan="${colspan}">`;
             html += `<div class="lookup-section-title">${escapeHtml(title)}</div>`;
             html += `<div class="lookup-section-copy">${escapeHtml(copy)}</div>`;
+            html += `<span class="section-count">${count} item${count === 1 ? '' : 's'}</span>`;
             html += '</td></tr>';
             return html;
         }
@@ -1896,6 +2553,7 @@ HTML_TEMPLATE = """
             html += '</div>';
             html += '</td>';
             html += renderStatusCells(result.network_statuses || {}, networks);
+            html += renderRowTotal(result.network_statuses || {}, networks);
             html += '</tr>';
             return html;
         }
@@ -1915,6 +2573,7 @@ HTML_TEMPLATE = """
             html += '</div>';
             html += '</td>';
             html += renderStatusCells(result.network_statuses || {}, networks);
+            html += renderRowTotal(result.network_statuses || {}, networks);
             html += '</tr>';
             return html;
         }
@@ -1924,9 +2583,56 @@ HTML_TEMPLATE = """
             for (const [index, network] of networks.entries()) {
                 const statusInfo = statuses[network.id];
                 html += `<td class="network-cell" data-column-index="${index + 1}"${tooltipAttribute(networkStatusTooltip(statusInfo))}>`;
-                html += renderNetworkStatus(statusInfo);
+                html += renderMatrixStatus(statusInfo);
                 html += '</td>';
             }
+            return html;
+        }
+
+        function renderRowTotal(statuses, networks) {
+            let positive = 0;
+            let caution = 0;
+            let considered = 0;
+            for (const network of networks) {
+                const info = statuses[network.id] || { status: 'no_result' };
+                const family = statusFamily(info.status || 'no_result');
+                if (family === 'na') {
+                    continue;
+                }
+                considered += 1;
+                if (family === 'positive') {
+                    positive += 1;
+                } else if (family === 'caution' || family === 'unknown') {
+                    caution += 1;
+                }
+            }
+            let html = '<td class="row-total-cell">';
+            html += `<div class="row-total"><span class="row-total-covered">${positive}</span> /${considered} plans`;
+            if (caution) {
+                html += `<br><span class="row-total-caution">+${caution} caution</span>`;
+            }
+            html += '</div></td>';
+            return html;
+        }
+
+        function renderMatrixLegend() {
+            const statuses = [
+                ['drug_covered', 'Covered'],
+                ['generic_covered', 'Generic covered'],
+                ['review_exact_drug', 'Review exact drug'],
+                ['other_form_covered', 'Other form covered'],
+                ['related_product_covered', 'Related product covered'],
+                ['drug_not_covered', 'Not covered'],
+                ['suspect', 'Suspect'],
+                ['data_not_provided', 'No data'],
+                ['not_offered', 'Not offered'],
+            ];
+            let html = '<div class="matrix-legend"><span class="matrix-legend-title">Legend</span>';
+            for (const [status, label] of statuses) {
+                html += `<span class="legend-status"><span class="matrix-status-icon ${matrixStatusClass(status)}">${networkStatusIcon(status) || '&middot;'}</span>${escapeHtml(label)}</span>`;
+            }
+            html += '<span class="legend-status"><strong>CMS</strong> = screening · <strong>Carrier</strong> = final</span>';
+            html += '</div>';
             return html;
         }
 
@@ -2192,13 +2898,9 @@ def drug_is_combination_match(query, drug):
     query_text = normalize_search_text(query)
     if "/" in query_text:
         return False
-    drug_text = normalize_search_text(
-        " ".join([
-            drug.get("name", ""),
-            drug.get("full_name", ""),
-        ])
-    )
-    return "/" in drug_text
+    name_text = normalize_search_text(drug.get("name", ""))
+    full_name = drug.get("full_name", "")
+    return "/" in name_text or " / " in full_name
 
 
 def search_drugs(name, limit=10):
@@ -2521,17 +3223,18 @@ def related_rxcui_coverage_status(prescription, related_rows, plan_ids, selected
         if row.get("rxcui")
     })
     count_detail = summarize_coverage_counts(related_rows)
-    status = "suspect" if prescription.get("selected_is_combination") else "likely_covered"
+    status = "related_product_covered" if prescription.get("selected_is_combination") else "other_form_covered"
     if len(covered_plan_ids) < len(plan_ids):
         status = "suspect" if prescription.get("selected_is_combination") else "partial_coverage"
 
     detail_prefix = ""
     if prescription.get("drug_match_warning"):
         detail_prefix = prescription["drug_match_warning"]
+    covered_label = "related product" if prescription.get("selected_is_combination") else "other strength/form"
     return make_network_status(
         status,
         "CMS Marketplace API",
-        f"{detail_prefix}Selected RxCUI {selected_rxcui} was not marked covered, but CMS shows related RxCUI match(es) {', '.join(related_rxcuis)} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. Confirm exact strength/form. {count_detail}.",
+        f"{detail_prefix}Selected RxCUI {selected_rxcui} was not marked covered, but CMS shows {covered_label} RxCUI match(es) {', '.join(related_rxcuis)} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. Confirm exact product, strength, form, and tier in the carrier formulary. {count_detail}.",
     )
 
 
@@ -2622,9 +3325,9 @@ def check_marketplace_drug_status(prescription, network, place):
         covered_plan_ids = plan_ids_by_status.get("Covered", set())
         if prescription.get("selected_is_combination"):
             return make_network_status(
-                "suspect",
+                "related_product_covered",
                 "CMS Marketplace API",
-                f"{match_note}CMS found coverage for {prescription['drug_name']}, but that RxCUI is not reliable evidence for the broad standalone drug name. {count_detail}.",
+                f"{match_note}CMS found coverage for {prescription['drug_name']}. Treat this as related coverage evidence, not final standalone-drug coverage; confirm exact product, strength, form, and tier in the carrier formulary. {count_detail}.",
             )
         if len(covered_plan_ids) < len(plan_ids):
             return make_network_status(
@@ -2634,9 +3337,9 @@ def check_marketplace_drug_status(prescription, network, place):
             )
         if match_note:
             return make_network_status(
-                "likely_covered",
+                "review_exact_drug",
                 "CMS Marketplace API",
-                f"{match_note}CMS shows {prescription['drug_name']} covered in all {len(plan_ids)} matching plan IDs. {count_detail}.",
+                f"{match_note}CMS shows {prescription['drug_name']} covered in all {len(plan_ids)} matching plan IDs. Confirm exact product, strength, form, and tier in the carrier formulary before telling a client it is covered. {count_detail}.",
             )
         return make_network_status(
             "drug_covered",
@@ -2653,9 +3356,9 @@ def check_marketplace_drug_status(prescription, network, place):
         generic_note = f" Generic RxCUI: {', '.join(generic_rxcuis)}." if generic_rxcuis else ""
         if prescription.get("selected_is_combination"):
             return make_network_status(
-                "suspect",
+                "related_product_covered",
                 "CMS Marketplace API",
-                f"{match_note}CMS found generic coverage for {prescription['drug_name']}, but that RxCUI is not reliable evidence for the broad standalone drug name.{generic_note} {count_detail}.",
+                f"{match_note}CMS found generic coverage for {prescription['drug_name']}. Treat this as related coverage evidence, not final standalone-drug coverage; confirm exact product, strength, form, and tier in the carrier formulary.{generic_note} {count_detail}.",
             )
         if len(generic_plan_ids) < len(plan_ids):
             return make_network_status(
@@ -2665,9 +3368,9 @@ def check_marketplace_drug_status(prescription, network, place):
             )
         if match_note:
             return make_network_status(
-                "likely_covered",
+                "review_exact_drug",
                 "CMS Marketplace API",
-                f"{match_note}CMS shows a generic equivalent covered in all {len(plan_ids)} matching plan IDs.{generic_note} {count_detail}.",
+                f"{match_note}CMS shows a generic equivalent covered in all {len(plan_ids)} matching plan IDs. Confirm whether the brand or only the generic is covered before telling a client it is covered.{generic_note} {count_detail}.",
             )
         return make_network_status(
             "generic_covered",
@@ -2705,7 +3408,7 @@ def check_marketplace_drug_status(prescription, network, place):
     return make_network_status(
         "drug_not_covered",
         "CMS Marketplace API",
-        f"CMS checked {len(plan_ids)} matching plan IDs and did not mark the RxCUI covered. {count_detail}.",
+        f"CMS checked {len(plan_ids)} matching plan IDs and did not mark the checked RxCUI candidate(s) covered. {count_detail}.",
     )
 
 

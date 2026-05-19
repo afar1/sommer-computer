@@ -540,6 +540,24 @@ class LookupTests(unittest.TestCase):
         self.assertTrue(result["selected_is_combination"])
         self.assertIn("combination-product RxCUI", result["drug_match_warning"])
 
+    def test_prescription_resolution_does_not_treat_dosage_unit_slash_as_combination(self):
+        drug_payload = [
+            {
+                "rxcui": "1991311",
+                "name": "OZEMPIC",
+                "strength": "1.34 mg/ml",
+                "route": "Injectable",
+                "full_name": "semaglutide 1.34 MG/ML Auto-Injector [Ozempic]",
+            }
+        ]
+
+        with patch.object(web_app.requests, "get") as mock_get:
+            mock_get.return_value = FakeResponse(drug_payload)
+            result = web_app.resolve_prescription("Ozempic")
+
+        self.assertFalse(result["selected_is_combination"])
+        self.assertEqual(result["drug_match_warning"], "")
+
     def test_marketplace_drug_lookup_marks_generic_coverage(self):
         network = {
             "id": "bcbstx:blue_advantage_hmo",
@@ -605,10 +623,10 @@ class LookupTests(unittest.TestCase):
                 prescription, network, place
             )
 
-        self.assertEqual(status["status"], "suspect")
-        self.assertIn("not reliable evidence for the broad standalone drug name", status["detail"])
+        self.assertEqual(status["status"], "related_product_covered")
+        self.assertIn("related coverage evidence", status["detail"])
 
-    def test_marketplace_drug_lookup_marks_likely_covered_when_rxcui_match_is_ambiguous(self):
+    def test_marketplace_drug_lookup_marks_review_exact_drug_when_rxcui_match_is_ambiguous(self):
         network = {
             "id": "bcbstx:blue_advantage_hmo",
             "name": "Blue Advantage HMO",
@@ -636,10 +654,11 @@ class LookupTests(unittest.TestCase):
                 prescription, network, place
             )
 
-        self.assertEqual(status["status"], "likely_covered")
+        self.assertEqual(status["status"], "review_exact_drug")
         self.assertIn("Selected RxCUI 12345 from 3 CMS autocomplete matches", status["detail"])
+        self.assertIn("Confirm exact product, strength, form, and tier", status["detail"])
 
-    def test_marketplace_drug_lookup_marks_likely_when_related_rxcui_is_covered(self):
+    def test_marketplace_drug_lookup_marks_other_form_covered_when_related_rxcui_is_covered(self):
         network = {
             "id": "bcbstx:blue_advantage_hmo",
             "name": "Blue Advantage HMO",
@@ -672,9 +691,9 @@ class LookupTests(unittest.TestCase):
                 prescription, network, place
             )
 
-        self.assertEqual(status["status"], "likely_covered")
-        self.assertIn("related RxCUI", status["detail"])
-        self.assertIn("Confirm exact strength/form", status["detail"])
+        self.assertEqual(status["status"], "other_form_covered")
+        self.assertIn("other strength/form RxCUI", status["detail"])
+        self.assertIn("Confirm exact product, strength, form, and tier", status["detail"])
         self.assertEqual(mock_get.call_args.kwargs["params"]["drugs"], "selected,related")
 
     def test_marketplace_drug_lookup_marks_ambiguous_no_record_as_suspect(self):
@@ -766,24 +785,34 @@ class LookupTests(unittest.TestCase):
         response = client.get("/")
         html = response.get_data(as_text=True)
 
-        self.assertIn(">Results</div>", html)
-        self.assertIn("CMS checks by matched NPI or RxCUI", html)
+        self.assertIn("Evidence · coverage matrix", html)
+        self.assertIn("every provider × every plan, with source authority", html)
+        self.assertIn("Row total", html)
+        self.assertIn("matrix-status-card", html)
+        self.assertIn("carrier-covered", html)
+        self.assertIn("matrix-legend", html)
+        self.assertIn("Practical lead", html)
+        self.assertNotIn("Client-safe summary", html)
+        self.assertIn("Case · Provider Network Checker", html)
+        self.assertIn("Run check", html)
+        self.assertIn("Coverage by NPI match against carrier rosters", html)
         self.assertIn("Providers", html)
         self.assertIn("Prescriptions", html)
         self.assertIn('id="prescriptions"', html)
-        self.assertIn("CMS provider coverage by matched NPI", html)
-        self.assertIn("CMS formulary coverage by RxCUI", html)
-        self.assertIn("return 'Generic';", html)
+        self.assertIn("CMS = screening, carrier formulary = final", html)
+        self.assertIn("return 'Generic covered';", html)
+        self.assertIn("Review exact drug", html)
+        self.assertIn("Other form covered", html)
+        self.assertIn("Related product covered", html)
         self.assertIn("No data", html)
         self.assertIn("return 'Likely';", html)
         self.assertIn("Partial coverage", html)
+        self.assertIn("Top matches:", html)
         self.assertIn("selected from", html)
-        self.assertIn("Data confidence legend", html)
-        self.assertIn("Verified", html)
         self.assertIn("Suspect", html)
         self.assertIn("Selected RxCUI not covered; exact drug may differ", html)
         self.assertIn("Coverage found; confirm exact NPI/location", html)
-        self.assertIn("Coverage found; confirm exact RxCUI", html)
+        self.assertIn("Coverage evidence found; confirm exact drug/form", html)
         self.assertIn("Only some matched plan IDs covered", html)
         self.assertIn("info-tip", html)
         self.assertIn("item-info", html)
