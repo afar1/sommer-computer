@@ -1431,6 +1431,7 @@ HTML_TEMPLATE = """
         .matrix-status-card {
             border: 1px solid var(--line);
             border-radius: 5px;
+            cursor: pointer;
             display: flex;
             flex-direction: column;
             gap: 18px;
@@ -1438,6 +1439,10 @@ HTML_TEMPLATE = """
             min-height: 58px;
             padding: 7px 8px;
             text-align: left;
+        }
+        .network-cell:focus-visible .matrix-status-card {
+            outline: 2px solid #2563eb;
+            outline-offset: 2px;
         }
         .matrix-status-card.formulary-split {
             gap: 8px;
@@ -1592,6 +1597,62 @@ HTML_TEMPLATE = """
             font-weight: 850;
             line-height: 1.2;
             margin-top: 3px;
+        }
+        .status-popover {
+            background: white;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+            color: var(--ink);
+            max-width: min(360px, calc(100vw - 32px));
+            padding: 12px 14px;
+            position: fixed;
+            text-align: left;
+            z-index: 50;
+        }
+        .status-popover-title {
+            align-items: center;
+            display: flex;
+            gap: 7px;
+            font-size: 13px;
+            font-weight: 850;
+            line-height: 1.2;
+            margin-bottom: 10px;
+        }
+        .status-popover-close {
+            background: transparent;
+            color: var(--ink-soft);
+            font-size: 18px;
+            line-height: 1;
+            margin-left: auto;
+            padding: 0 2px;
+            width: auto;
+        }
+        .status-popover-close:hover {
+            background: transparent;
+            color: var(--ink);
+        }
+        .status-popover-row {
+            border-top: 1px solid #eef2f7;
+            padding: 8px 0;
+        }
+        .status-popover-label {
+            color: var(--ink-soft);
+            font-size: 10px;
+            font-weight: 850;
+            letter-spacing: 0.06em;
+            line-height: 1.2;
+            text-transform: uppercase;
+        }
+        .status-popover-value {
+            color: var(--ink);
+            font-size: 12px;
+            line-height: 1.4;
+            margin-top: 3px;
+        }
+        .status-popover-value.mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-weight: 750;
         }
         .row-total {
             color: var(--ink-soft);
@@ -2181,6 +2242,7 @@ HTML_TEMPLATE = """
         let drugSearchTimer = null;
         let drugSearchRequest = null;
         let drugSearchSequence = 0;
+        let activeStatusPopover = null;
 
         searchForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -2226,6 +2288,38 @@ HTML_TEMPLATE = """
         });
 
         resultsDiv.addEventListener('pointerleave', clearColumnHover);
+        resultsDiv.addEventListener('click', function(e) {
+            const cell = e.target.closest('.network-cell[data-status-detail]');
+            if (!cell || !resultsDiv.contains(cell)) {
+                return;
+            }
+            showStatusPopover(cell);
+        });
+        resultsDiv.addEventListener('keydown', function(e) {
+            if (e.key !== 'Enter' && e.key !== ' ') {
+                return;
+            }
+            const cell = e.target.closest('.network-cell[data-status-detail]');
+            if (!cell || !resultsDiv.contains(cell)) {
+                return;
+            }
+            e.preventDefault();
+            showStatusPopover(cell);
+        });
+        document.addEventListener('click', function(e) {
+            if (!activeStatusPopover) {
+                return;
+            }
+            if (activeStatusPopover.contains(e.target) || e.target.closest('.network-cell[data-status-detail]')) {
+                return;
+            }
+            closeStatusPopover();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeStatusPopover();
+            }
+        });
 
         for (const link of document.querySelectorAll('[data-sample]')) {
             link.addEventListener('click', function(e) {
@@ -2678,12 +2772,64 @@ HTML_TEMPLATE = """
             return ` data-tooltip="${escapeHtml(value)}"`;
         }
 
+        function dataAttribute(name, value) {
+            if (!value) {
+                return '';
+            }
+            return ` ${name}="${escapeHtml(value)}"`;
+        }
+
         function renderInfoTip(label, tooltip, className) {
             if (!tooltip) {
                 return '';
             }
             const classes = className ? `info-tip ${className}` : 'info-tip';
             return `<span class="${classes}" tabindex="0" aria-label="${escapeHtml(label)}"${tooltipAttribute(tooltip)}>i</span>`;
+        }
+
+        function closeStatusPopover() {
+            if (!activeStatusPopover) {
+                return;
+            }
+            activeStatusPopover.remove();
+            activeStatusPopover = null;
+        }
+
+        function showStatusPopover(cell) {
+            const data = JSON.parse(cell.dataset.statusDetail || '{}');
+            closeStatusPopover();
+            activeStatusPopover = document.createElement('div');
+            activeStatusPopover.className = 'status-popover';
+            activeStatusPopover.setAttribute('role', 'dialog');
+            activeStatusPopover.innerHTML = renderStatusPopover(data);
+            document.body.appendChild(activeStatusPopover);
+            activeStatusPopover.querySelector('[data-close-status-popover]').addEventListener('click', closeStatusPopover);
+
+            const cellRect = cell.getBoundingClientRect();
+            const popoverRect = activeStatusPopover.getBoundingClientRect();
+            const left = Math.min(
+                Math.max(16, cellRect.left),
+                window.innerWidth - popoverRect.width - 16
+            );
+            const topBelow = cellRect.bottom + 8;
+            const topAbove = cellRect.top - popoverRect.height - 8;
+            activeStatusPopover.style.left = `${left}px`;
+            activeStatusPopover.style.top = `${topBelow + popoverRect.height < window.innerHeight ? topBelow : Math.max(16, topAbove)}px`;
+        }
+
+        function renderStatusPopover(data) {
+            let html = '<div class="status-popover-title">';
+            html += `<span class="matrix-status-icon ${escapeHtml(data.className || '')}">${escapeHtml(data.icon || '·')}</span>`;
+            html += `<span>${escapeHtml(data.label || 'Status')}</span>`;
+            html += '<button type="button" class="status-popover-close" data-close-status-popover aria-label="Close status details">&times;</button>';
+            html += '</div>';
+            for (const row of data.rows || []) {
+                html += '<div class="status-popover-row">';
+                html += `<div class="status-popover-label">${escapeHtml(row.label)}</div>`;
+                html += `<div class="status-popover-value${row.mono ? ' mono' : ''}">${escapeHtml(row.value)}</div>`;
+                html += '</div>';
+            }
+            return html;
         }
 
         function clearColumnHover() {
@@ -2942,31 +3088,40 @@ HTML_TEMPLATE = """
             return '';
         }
 
-        function networkStatusTooltip(statusInfo) {
+        function networkStatusPopoverData(statusInfo) {
             const info = statusInfo || { status: 'no_result', detail: 'No lookup result', source: 'No result' };
             const status = info.status || 'no_result';
             const detail = info.detail || '';
             const source = info.source || '';
             const reason = networkStatusReason(status, detail);
-            const parts = [networkStatusLabel(status)];
+            const rows = [];
             if (reason) {
-                parts.push(reason);
+                rows.push({ label: 'Meaning', value: reason });
             }
             if (source) {
-                parts.push(`Source: ${source}`);
+                rows.push({ label: 'Source', value: source, mono: true });
             }
             if (info.tier_detail) {
-                parts.push(info.tier_detail);
+                rows.push({ label: 'Tier', value: [info.tier_detail, info.restriction_label].filter(Boolean).join(' · '), mono: true });
             }
             for (const tier of info.formulary_tiers || []) {
                 if (tier.formulary_name && tier.tier_detail) {
-                    parts.push(`${tier.formulary_name}: ${tier.tier_detail}`);
+                    rows.push({
+                        label: tier.formulary_name,
+                        value: [tier.tier_detail, tier.restriction_label].filter(Boolean).join(' · '),
+                        mono: true,
+                    });
                 }
             }
             if (detail && detail !== reason) {
-                parts.push(detail);
+                rows.push({ label: 'Detail', value: detail });
             }
-            return parts.join(' | ');
+            return {
+                className: matrixStatusClass(status),
+                icon: networkStatusIcon(status) || '·',
+                label: networkStatusLabel(status),
+                rows,
+            };
         }
 
         function networkStatusReason(status, detail) {
@@ -3313,7 +3468,8 @@ HTML_TEMPLATE = """
             let html = '';
             for (const [index, network] of networks.entries()) {
                 const statusInfo = statuses[network.id];
-                html += `<td class="network-cell" data-column-index="${index + 1}"${tooltipAttribute(networkStatusTooltip(statusInfo))}>`;
+                const popoverData = JSON.stringify(networkStatusPopoverData(statusInfo));
+                html += `<td class="network-cell" data-column-index="${index + 1}" tabindex="0"${dataAttribute('data-status-detail', popoverData)}>`;
                 html += itemType === 'prescription' ? renderPrescriptionMatrixStatus(statusInfo) : renderMatrixStatus(statusInfo);
                 html += '</td>';
             }
