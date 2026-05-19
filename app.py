@@ -2237,6 +2237,15 @@ HTML_TEMPLATE = """
             }, 250);
         });
         facilitySearchResults.addEventListener('click', function(e) {
+            const textButton = e.target.closest('[data-add-facility-text]');
+            if (textButton) {
+                addFacilitySelection({
+                    display_name: textButton.dataset.addFacilityText,
+                    name: textButton.dataset.addFacilityText,
+                    selection_type: 'text',
+                });
+                return;
+            }
             const button = e.target.closest('[data-provider-index]');
             if (!button) {
                 return;
@@ -2272,6 +2281,15 @@ HTML_TEMPLATE = """
             }, 250);
         });
         drugSearchResults.addEventListener('click', function(e) {
+            const textButton = e.target.closest('[data-add-rx-text]');
+            if (textButton) {
+                addPrescriptionSelection({
+                    display_name: textButton.dataset.addRxText,
+                    prescription: textButton.dataset.addRxText,
+                    selection_type: 'text',
+                });
+                return;
+            }
             const button = e.target.closest('[data-drug-index]');
             if (!button) {
                 return;
@@ -2379,6 +2397,10 @@ HTML_TEMPLATE = """
             if (provider.npi && selectedFacilities.some(item => item.npi === provider.npi)) {
                 return;
             }
+            const providerName = providerDisplayName(provider).toLowerCase();
+            if (!provider.npi && selectedFacilities.some(item => providerDisplayName(item).toLowerCase() === providerName)) {
+                return;
+            }
             selectedFacilities.push(provider);
             syncFacilitySelectionInputs();
         }
@@ -2405,6 +2427,18 @@ HTML_TEMPLATE = """
 
         function renderFacilitySearchResults(providers) {
             if (!providers.length) {
+                const query = facilitySearchInput.value.trim();
+                if (query.length >= 2) {
+                    const safeQuery = escapeHtml(query);
+                    facilitySearchResults.innerHTML = `<div class="drug-option">
+                        <div>
+                            <div class="drug-option-name">${safeQuery}</div>
+                            <div class="drug-option-meta">No exact facility match found</div>
+                        </div>
+                        <button type="button" class="drug-option-add" data-add-facility-text="${safeQuery}">Add anyway</button>
+                    </div>`;
+                    return;
+                }
                 facilitySearchResults.innerHTML = '<div class="selected-rx-empty">Search for a hospital, clinic, or facility name.</div>';
                 return;
             }
@@ -2500,6 +2534,10 @@ HTML_TEMPLATE = """
             if (drug.rxcui && selectedPrescriptions.some(item => item.rxcui === drug.rxcui)) {
                 return;
             }
+            const prescriptionName = prescriptionDisplayName(drug).toLowerCase();
+            if (!drug.rxcui && selectedPrescriptions.some(item => prescriptionDisplayName(item).toLowerCase() === prescriptionName)) {
+                return;
+            }
             selectedPrescriptions.push(drug);
             syncPrescriptionSelectionInputs();
         }
@@ -2551,7 +2589,19 @@ HTML_TEMPLATE = """
 
         function renderDrugSearchResults(drugs, emptyMessage) {
             if (!drugs.length) {
-                drugSearchResults.innerHTML = `<div class="selected-rx-empty">${escapeHtml(emptyMessage || 'Search for a generic or brand name.')}</div>`;
+                const query = drugSearchInput.value.trim();
+                if (query.length >= 2) {
+                    const safeQuery = escapeHtml(query);
+                    drugSearchResults.innerHTML = `<div class="drug-option">
+                        <div>
+                            <div class="drug-option-name">${safeQuery}</div>
+                            <div class="drug-option-meta">${escapeHtml(emptyMessage || 'No checked carrier formulary match found')}</div>
+                        </div>
+                        <button type="button" class="drug-option-add" data-add-rx-text="${safeQuery}">Add anyway</button>
+                    </div>`;
+                    return;
+                }
+                drugSearchResults.innerHTML = '<div class="selected-rx-empty">Search for a generic or brand name.</div>';
                 return;
             }
             drugSearchResults.innerHTML = drugs.map((drug, index) => {
