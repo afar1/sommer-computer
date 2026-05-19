@@ -885,6 +885,221 @@ HTML_TEMPLATE = """
         .network-link.uhc:hover {
             background: #fde68a;
         }
+        .prescription-picker {
+            align-items: flex-start;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .selected-rx-list {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            width: 100%;
+        }
+        .selected-rx-empty {
+            border: 1px dashed var(--line);
+            border-radius: 6px;
+            color: var(--ink-soft);
+            font-size: 12px;
+            padding: 10px 11px;
+        }
+        .selected-rx-chip {
+            align-items: flex-start;
+            background: #f8fafc;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
+            padding: 9px 10px;
+        }
+        .selected-rx-name {
+            color: var(--ink);
+            font-size: 13px;
+            font-weight: 750;
+            line-height: 1.25;
+        }
+        .selected-rx-meta {
+            color: var(--ink-muted);
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        .selected-rx-remove {
+            background: transparent;
+            color: var(--ink-soft);
+            flex: 0 0 auto;
+            font-size: 18px;
+            line-height: 1;
+            padding: 0 2px;
+            width: auto;
+        }
+        .selected-rx-remove:hover {
+            background: transparent;
+            color: var(--ink);
+        }
+        .secondary-action {
+            background: #f3f6f8;
+            border: 1px solid var(--line);
+            color: var(--ink);
+            width: auto;
+        }
+        .secondary-action:hover {
+            background: #e8edf2;
+        }
+        .modal-backdrop {
+            align-items: center;
+            background: rgba(32, 36, 42, 0.45);
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            left: 0;
+            padding: 24px;
+            position: fixed;
+            right: 0;
+            top: 0;
+            z-index: 20;
+        }
+        .modal-backdrop[hidden] {
+            display: none;
+        }
+        .prescription-modal {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 22px 70px rgba(0, 0, 0, 0.25);
+            max-height: min(760px, calc(100vh - 48px));
+            max-width: 760px;
+            overflow: hidden;
+            width: min(760px, 100%);
+        }
+        .modal-header,
+        .modal-footer {
+            align-items: center;
+            display: flex;
+            justify-content: space-between;
+            padding: 18px 22px;
+        }
+        .modal-header {
+            border-bottom: 1px solid var(--line);
+        }
+        .modal-footer {
+            background: #f8fafc;
+            border-top: 1px solid var(--line);
+        }
+        .modal-title {
+            color: #2b6cb0;
+            font-size: 24px;
+            font-weight: 750;
+        }
+        .modal-close {
+            background: transparent;
+            color: var(--ink-muted);
+            font-size: 28px;
+            line-height: 1;
+            padding: 0 2px;
+            width: auto;
+        }
+        .modal-close:hover {
+            background: transparent;
+            color: var(--ink);
+        }
+        .modal-body {
+            max-height: calc(100vh - 220px);
+            overflow-y: auto;
+            padding: 18px 22px 20px;
+        }
+        .modal-copy {
+            color: var(--ink-muted);
+            font-size: 14px;
+            line-height: 1.45;
+            margin: 0 0 14px;
+        }
+        .drug-search-wrap {
+            align-items: center;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            display: flex;
+            margin-bottom: 14px;
+            overflow: hidden;
+        }
+        .drug-search-wrap:focus-within {
+            border-color: #2b6cb0;
+            box-shadow: 0 0 0 2px rgba(43, 108, 176, 0.12);
+        }
+        .drug-search-wrap input {
+            border: 0;
+            border-radius: 0;
+            background: white;
+        }
+        .drug-search-wrap input:focus {
+            border: 0;
+            box-shadow: none;
+        }
+        .drug-clear {
+            background: transparent;
+            color: #2b6cb0;
+            font-size: 13px;
+            padding: 0 12px;
+            width: auto;
+        }
+        .drug-clear:hover {
+            background: transparent;
+            color: #1d4ed8;
+        }
+        .drug-option-list {
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            max-height: 330px;
+            overflow-y: auto;
+        }
+        .drug-option {
+            align-items: center;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            gap: 14px;
+            justify-content: space-between;
+            padding: 13px 16px;
+        }
+        .drug-option:last-child {
+            border-bottom: 0;
+        }
+        .drug-option:hover {
+            background: #f8fafc;
+        }
+        .drug-option-name {
+            color: var(--ink);
+            font-size: 14px;
+            font-weight: 750;
+            line-height: 1.25;
+        }
+        .drug-option-meta {
+            color: var(--ink-muted);
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        .drug-option-add {
+            background: white;
+            border: 1px solid var(--line);
+            color: #2b6cb0;
+            flex: 0 0 auto;
+            width: auto;
+        }
+        .drug-option-add:hover {
+            background: #eff6ff;
+        }
+        .modal-selected {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .modal-selected-title {
+            color: var(--ink-soft);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
         .network-matrix {
             width: 100%;
             border-collapse: collapse;
@@ -1642,9 +1857,13 @@ HTML_TEMPLATE = """
 
             <div class="form-group">
                 <label for="prescriptions">Prescription Name(s)</label>
-                <textarea id="prescriptions" name="prescriptions" rows="2"
-                          placeholder="e.g., Ozempic, Levothyroxine, Ibuprofen"></textarea>
-                <p class="hint">Separate multiple names with commas. Marketplace drug coverage is matched by RxCUI, so exact strength/form can matter.</p>
+                <input type="hidden" id="prescriptions" name="prescriptions">
+                <input type="hidden" id="prescriptionSelections" name="prescription_selections">
+                <div class="prescription-picker">
+                    <div id="selectedPrescriptions" class="selected-rx-list"></div>
+                    <button type="button" id="openPrescriptionModal" class="secondary-action">Add prescription</button>
+                </div>
+                <p class="hint">Choose a generic name or a specific brand, strength, and form. Exact RxCUI selection reduces broad-name ambiguity.</p>
             </div>
         </section>
 
@@ -1708,6 +1927,31 @@ HTML_TEMPLATE = """
     <div id="sourceStatus"></div>
     <div id="results"></div>
 
+    <div class="modal-backdrop" id="prescriptionModal" hidden>
+        <div class="prescription-modal" role="dialog" aria-modal="true" aria-labelledby="prescriptionModalTitle">
+            <div class="modal-header">
+                <div class="modal-title" id="prescriptionModalTitle">Add a prescription</div>
+                <button type="button" class="modal-close" id="closePrescriptionModal" aria-label="Close prescription picker">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-copy">Search by generic or brand name, then choose the exact option when you know it.</p>
+                <div class="drug-search-wrap">
+                    <input type="search" id="drugSearchInput" placeholder="Enter a prescription name" autocomplete="off">
+                    <button type="button" class="drug-clear" id="clearDrugSearch">Clear</button>
+                </div>
+                <div id="drugSearchResults" class="drug-option-list"></div>
+                <div class="modal-selected">
+                    <div class="modal-selected-title">Selected prescriptions</div>
+                    <div id="modalSelectedPrescriptions" class="selected-rx-list"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span class="hint">Carrier formulary is still final for tier and restrictions.</span>
+                <button type="button" id="donePrescriptionModal" class="secondary-action">Done</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const sampleScenarios = {
             'dallas-specialty': {
@@ -1747,6 +1991,15 @@ HTML_TEMPLATE = """
         const searchForm = document.getElementById('searchForm');
         const sourceStatusDiv = document.getElementById('sourceStatus');
         const resultsDiv = document.getElementById('results');
+        const prescriptionInput = document.getElementById('prescriptions');
+        const prescriptionSelectionsInput = document.getElementById('prescriptionSelections');
+        const selectedPrescriptionsDiv = document.getElementById('selectedPrescriptions');
+        const modalSelectedPrescriptionsDiv = document.getElementById('modalSelectedPrescriptions');
+        const prescriptionModal = document.getElementById('prescriptionModal');
+        const drugSearchInput = document.getElementById('drugSearchInput');
+        const drugSearchResults = document.getElementById('drugSearchResults');
+        let selectedPrescriptions = [];
+        let drugSearchTimer = null;
 
         searchForm.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1810,10 +2063,42 @@ HTML_TEMPLATE = """
             document.getElementById('demoScenarios').classList.toggle('is-open');
         });
 
+        document.getElementById('openPrescriptionModal').addEventListener('click', openPrescriptionModal);
+        document.getElementById('closePrescriptionModal').addEventListener('click', closePrescriptionModal);
+        document.getElementById('donePrescriptionModal').addEventListener('click', closePrescriptionModal);
+        document.getElementById('clearDrugSearch').addEventListener('click', function() {
+            drugSearchInput.value = '';
+            renderDrugSearchResults([]);
+            drugSearchInput.focus();
+        });
+        prescriptionModal.addEventListener('click', function(e) {
+            if (e.target === prescriptionModal) {
+                closePrescriptionModal();
+            }
+        });
+        drugSearchInput.addEventListener('input', function() {
+            window.clearTimeout(drugSearchTimer);
+            const query = this.value.trim();
+            drugSearchTimer = window.setTimeout(function() {
+                searchDrugOptions(query);
+            }, 250);
+        });
+        drugSearchResults.addEventListener('click', function(e) {
+            const button = e.target.closest('[data-drug-index]');
+            if (!button) {
+                return;
+            }
+            const drug = JSON.parse(button.dataset.drug);
+            addPrescriptionSelection(drug);
+        });
+        selectedPrescriptionsDiv.addEventListener('click', removePrescriptionFromClick);
+        modalSelectedPrescriptionsDiv.addEventListener('click', removePrescriptionFromClick);
+
         const initialSample = new URLSearchParams(window.location.search).get('sample');
         if (initialSample && sampleScenarios[initialSample]) {
             applyScenario(initialSample);
         }
+        syncPrescriptionSelectionInputs();
         loadSourceStatus();
 
         function applyScenario(sampleId) {
@@ -1824,11 +2109,122 @@ HTML_TEMPLATE = """
 
             document.getElementById('doctors').value = scenario.doctors || scenario.providers || '';
             document.getElementById('facilities').value = scenario.facilities || '';
-            document.getElementById('prescriptions').value = scenario.prescriptions || '';
+            setSelectedPrescriptionsFromText(scenario.prescriptions || '');
             document.getElementById('location').value = scenario.location;
             document.getElementById('radius').value = scenario.radius;
             document.getElementById('city').value = scenario.city;
             searchForm.requestSubmit();
+        }
+
+        function openPrescriptionModal() {
+            prescriptionModal.hidden = false;
+            renderSelectedPrescriptions();
+            window.setTimeout(function() {
+                drugSearchInput.focus();
+            }, 0);
+        }
+
+        function closePrescriptionModal() {
+            prescriptionModal.hidden = true;
+        }
+
+        function setSelectedPrescriptionsFromText(value) {
+            selectedPrescriptions = String(value || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean)
+                .map(item => ({
+                    display_name: item,
+                    prescription: item,
+                    selection_type: 'text',
+                }));
+            syncPrescriptionSelectionInputs();
+        }
+
+        function syncPrescriptionSelectionInputs() {
+            prescriptionInput.value = selectedPrescriptions.map(prescriptionDisplayName).join(', ');
+            prescriptionSelectionsInput.value = JSON.stringify(
+                selectedPrescriptions.filter(item => item.rxcui)
+            );
+            renderSelectedPrescriptions();
+        }
+
+        function prescriptionDisplayName(item) {
+            return item.display_name || item.drug_name || item.prescription || item.name || '';
+        }
+
+        function prescriptionMeta(item) {
+            if (item.selection_type === 'text') {
+                return 'Broad name';
+            }
+            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '']
+                .filter(Boolean)
+                .join(' · ');
+        }
+
+        function renderSelectedPrescriptions() {
+            const html = selectedPrescriptions.length
+                ? selectedPrescriptions.map((item, index) => {
+                    return `<div class="selected-rx-chip">
+                        <div>
+                            <div class="selected-rx-name">${escapeHtml(prescriptionDisplayName(item))}</div>
+                            <div class="selected-rx-meta">${escapeHtml(prescriptionMeta(item))}</div>
+                        </div>
+                        <button type="button" class="selected-rx-remove" data-remove-rx="${index}" aria-label="Remove ${escapeHtml(prescriptionDisplayName(item))}">&times;</button>
+                    </div>`;
+                }).join('')
+                : '<div class="selected-rx-empty">No prescriptions selected yet.</div>';
+            selectedPrescriptionsDiv.innerHTML = html;
+            modalSelectedPrescriptionsDiv.innerHTML = html;
+        }
+
+        function removePrescriptionFromClick(e) {
+            const button = e.target.closest('[data-remove-rx]');
+            if (!button) {
+                return;
+            }
+            selectedPrescriptions.splice(Number(button.dataset.removeRx), 1);
+            syncPrescriptionSelectionInputs();
+        }
+
+        function addPrescriptionSelection(drug) {
+            if (drug.rxcui && selectedPrescriptions.some(item => item.rxcui === drug.rxcui)) {
+                return;
+            }
+            selectedPrescriptions.push(drug);
+            syncPrescriptionSelectionInputs();
+        }
+
+        async function searchDrugOptions(query) {
+            if (query.length < 2) {
+                renderDrugSearchResults([]);
+                return;
+            }
+            drugSearchResults.innerHTML = '<div class="selected-rx-empty">Searching...</div>';
+            try {
+                const response = await fetch('/drugs/search?q=' + encodeURIComponent(query));
+                const data = await response.json();
+                renderDrugSearchResults(data.drugs || []);
+            } catch (error) {
+                drugSearchResults.innerHTML = '<div class="selected-rx-empty">Drug lookup failed. Try again.</div>';
+            }
+        }
+
+        function renderDrugSearchResults(drugs) {
+            if (!drugs.length) {
+                drugSearchResults.innerHTML = '<div class="selected-rx-empty">Search for a generic or brand name.</div>';
+                return;
+            }
+            drugSearchResults.innerHTML = drugs.map((drug, index) => {
+                const payload = escapeHtml(JSON.stringify(drug));
+                return `<div class="drug-option">
+                    <div>
+                        <div class="drug-option-name">${escapeHtml(drug.display_name)}</div>
+                        <div class="drug-option-meta">${escapeHtml(drug.coverage_type)} / ${escapeHtml(drug.dose_form || drug.route || 'Drug')}</div>
+                    </div>
+                    <button type="button" class="drug-option-add" data-drug-index="${index}" data-drug="${payload}">Add</button>
+                </div>`;
+            }).join('');
         }
 
         function formatProviderType(providerType) {
@@ -2098,6 +2494,9 @@ HTML_TEMPLATE = """
         function matrixStatusDetail(statusInfo) {
             const info = statusInfo || {};
             const status = info.status || 'no_result';
+            if (info.tier_label) {
+                return [info.tier_label, info.restriction_label].filter(Boolean).join(' ');
+            }
             if (status === 'generic_covered') {
                 return 'generic';
             }
@@ -2131,6 +2530,9 @@ HTML_TEMPLATE = """
             }
             if (source) {
                 parts.push(`Source: ${source}`);
+            }
+            if (info.tier_detail) {
+                parts.push(info.tier_detail);
             }
             if (detail && detail !== reason) {
                 parts.push(detail);
@@ -2858,6 +3260,36 @@ def format_drug_name(drug):
     return " ".join(part for part in parts if part).strip()
 
 
+def drug_display_name(drug):
+    name = drug.get("name", "")
+    dose_form = drug.get("rxnorm_dose_form") or drug.get("route", "")
+    strength = drug.get("strength", "")
+    if strength and dose_form:
+        return f"{name} {strength} {dose_form}"
+    return format_drug_name(drug) or drug.get("full_name", "") or drug.get("rxcui", "")
+
+
+def drug_coverage_type(drug):
+    full_name = drug.get("full_name", "")
+    name = drug.get("name", "")
+    if "[" in full_name or name.isupper():
+        return "Branded"
+    return "Generic"
+
+
+def serialize_drug_candidate(drug):
+    return {
+        "rxcui": str(drug.get("rxcui", "")),
+        "name": drug.get("name", ""),
+        "strength": drug.get("strength", ""),
+        "route": drug.get("route", ""),
+        "full_name": drug.get("full_name", ""),
+        "dose_form": drug.get("rxnorm_dose_form") or drug.get("route", ""),
+        "display_name": drug_display_name(drug),
+        "coverage_type": drug_coverage_type(drug),
+    }
+
+
 def drug_match_score(query, drug):
     query_text = normalize_search_text(query)
     name = normalize_search_text(drug.get("name", ""))
@@ -2947,6 +3379,34 @@ def resolve_prescription(name):
     }
 
 
+def resolve_selected_prescription(selection):
+    rxcui = str(selection.get("rxcui", "")).strip()
+    if not rxcui:
+        return resolve_prescription(selection.get("display_name") or selection.get("prescription") or "")
+
+    selected = {
+        "rxcui": rxcui,
+        "name": selection.get("name", ""),
+        "strength": selection.get("strength", ""),
+        "route": selection.get("route", ""),
+        "full_name": selection.get("full_name", ""),
+        "rxnorm_dose_form": selection.get("dose_form", ""),
+    }
+    display_name = selection.get("display_name") or drug_display_name(selected)
+    return {
+        "prescription": display_name,
+        "drug_found": True,
+        "drug_match_count": 1,
+        "drug_results": [selected],
+        "rxcui": rxcui,
+        "drug_name": format_drug_name(selected) or display_name,
+        "drug_detail": selected.get("full_name", ""),
+        "selected_is_combination": drug_is_combination_match(display_name, selected),
+        "drug_match_warning": "",
+        "selected_from_picker": True,
+    }
+
+
 def generate_bcbstx_urls(name, lat, lon, radius):
     """Generate BCBSTX provider finder URLs."""
     urls = {}
@@ -2969,12 +3429,14 @@ def generate_uhc_urls():
     return urls
 
 
-def make_network_status(status, source, detail):
-    return {
+def make_network_status(status, source, detail, **extra):
+    result = {
         "status": status,
         "source": source,
         "detail": detail,
     }
+    result.update(extra)
+    return result
 
 
 def plan_matches_marketplace_network(plan, network):
@@ -3162,6 +3624,76 @@ def summarize_coverage_counts(coverage_rows):
     )
 
 
+TIER_KEYS = (
+    "tier",
+    "drug_tier",
+    "formulary_tier",
+    "formularyTier",
+    "tier_level",
+    "tierLevel",
+)
+
+RESTRICTION_KEYS = {
+    "PA": ("prior_authorization", "priorAuthorization", "prior_auth", "pa"),
+    "ST": ("step_therapy", "stepTherapy", "st"),
+    "QL": ("quantity_limit", "quantityLimit", "quantity_limits", "ql"),
+}
+
+
+def normalize_tier_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.lower().startswith("tier"):
+        return "Tier " + text.split()[-1]
+    if text.isdigit():
+        return f"Tier {text}"
+    return text
+
+
+def coverage_row_tier(row):
+    for key in TIER_KEYS:
+        tier = normalize_tier_value(row.get(key))
+        if tier:
+            return tier
+    return ""
+
+
+def truthy_coverage_value(value):
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "required", "applies"}
+
+
+def coverage_row_restrictions(row):
+    labels = []
+    for label, keys in RESTRICTION_KEYS.items():
+        if any(truthy_coverage_value(row.get(key)) for key in keys):
+            labels.append(label)
+    return labels
+
+
+def summarize_tiers(coverage_rows):
+    tiers = []
+    restrictions = []
+    for row in coverage_rows:
+        tier = coverage_row_tier(row)
+        if tier and tier not in tiers:
+            tiers.append(tier)
+        for restriction in coverage_row_restrictions(row):
+            if restriction not in restrictions:
+                restrictions.append(restriction)
+    if not tiers:
+        return "", "", " ".join(restrictions)
+    detail = "Tier: " + ", ".join(tiers)
+    if len(tiers) == 1:
+        label = tiers[0].replace("Tier ", "T")
+    else:
+        label = "Tiers"
+    return label, detail, " ".join(restrictions)
+
+
 def plan_ids_by_coverage_status(coverage_rows):
     plan_ids_by_status = {}
     for row in coverage_rows:
@@ -3224,10 +3756,15 @@ def related_rxcui_coverage_status(prescription, related_rows, plan_ids, selected
     if prescription.get("drug_match_warning"):
         detail_prefix = prescription["drug_match_warning"]
     covered_label = "related product" if prescription.get("selected_is_combination") else "other strength/form"
+    tier_label, tier_detail, restriction_label = summarize_tiers(related_covered_rows)
+    tier_sentence = f" {tier_detail}." if tier_detail else ""
     return make_network_status(
         status,
         "CMS Marketplace API",
-        f"{detail_prefix}Selected RxCUI {selected_rxcui} was not marked covered, but CMS shows {covered_label} RxCUI match(es) {', '.join(related_rxcuis)} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. Confirm exact product, strength, form, and tier in the carrier formulary. {count_detail}.",
+        f"{detail_prefix}Selected RxCUI {selected_rxcui} was not marked covered, but CMS shows {covered_label} RxCUI match(es) {', '.join(related_rxcuis)} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs.{tier_sentence} Confirm exact product, strength, form, and tier in the carrier formulary. {count_detail}.",
+        tier_label=tier_label,
+        tier_detail=tier_detail,
+        restriction_label=restriction_label,
     )
 
 
@@ -3316,31 +3853,55 @@ def check_marketplace_drug_status(prescription, network, place):
     match_note = prescription_match_note(prescription)
     if counts["Covered"]:
         covered_plan_ids = plan_ids_by_status.get("Covered", set())
+        covered_rows = [
+            row for row in selected_rows
+            if row.get("coverage") == "Covered"
+        ]
+        tier_label, tier_detail, restriction_label = summarize_tiers(covered_rows)
+        tier_sentence = f" {tier_detail}." if tier_detail else ""
         if prescription.get("selected_is_combination"):
             return make_network_status(
                 "related_product_covered",
                 "CMS Marketplace API",
-                f"{match_note}CMS found coverage for {prescription['drug_name']}. Treat this as related coverage evidence, not final standalone-drug coverage; confirm exact product, strength, form, and tier in the carrier formulary. {count_detail}.",
+                f"{match_note}CMS found coverage for {prescription['drug_name']}.{tier_sentence} Treat this as related coverage evidence, not final standalone-drug coverage; confirm exact product, strength, form, and tier in the carrier formulary. {count_detail}.",
+                tier_label=tier_label,
+                tier_detail=tier_detail,
+                restriction_label=restriction_label,
             )
         if len(covered_plan_ids) < len(plan_ids):
             return make_network_status(
                 "partial_coverage",
                 "CMS Marketplace API",
-                f"{match_note}CMS shows {prescription['drug_name']} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. {count_detail}.",
+                f"{match_note}CMS shows {prescription['drug_name']} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs.{tier_sentence} {count_detail}.",
+                tier_label=tier_label,
+                tier_detail=tier_detail,
+                restriction_label=restriction_label,
             )
         if match_note:
             return make_network_status(
                 "review_exact_drug",
                 "CMS Marketplace API",
-                f"{match_note}CMS shows {prescription['drug_name']} covered in all {len(plan_ids)} matching plan IDs. Confirm exact product, strength, form, and tier in the carrier formulary before telling a client it is covered. {count_detail}.",
+                f"{match_note}CMS shows {prescription['drug_name']} covered in all {len(plan_ids)} matching plan IDs.{tier_sentence} Confirm exact product, strength, form, and tier in the carrier formulary before telling a client it is covered. {count_detail}.",
+                tier_label=tier_label,
+                tier_detail=tier_detail,
+                restriction_label=restriction_label,
             )
         return make_network_status(
             "drug_covered",
             "CMS Marketplace API",
-            f"CMS shows {prescription['drug_name']} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs. {count_detail}.",
+            f"CMS shows {prescription['drug_name']} covered in {len(covered_plan_ids)} of {len(plan_ids)} matching plan IDs.{tier_sentence} {count_detail}.",
+            tier_label=tier_label,
+            tier_detail=tier_detail,
+            restriction_label=restriction_label,
         )
     if counts["GenericCovered"]:
         generic_plan_ids = plan_ids_by_status.get("GenericCovered", set())
+        generic_rows = [
+            row for row in selected_rows
+            if row.get("coverage") == "GenericCovered"
+        ]
+        tier_label, tier_detail, restriction_label = summarize_tiers(generic_rows)
+        tier_sentence = f" {tier_detail}." if tier_detail else ""
         generic_rxcuis = sorted({
             row.get("generic_rxcui", "")
             for row in selected_rows
@@ -3351,24 +3912,36 @@ def check_marketplace_drug_status(prescription, network, place):
             return make_network_status(
                 "related_product_covered",
                 "CMS Marketplace API",
-                f"{match_note}CMS found generic coverage for {prescription['drug_name']}. Treat this as related coverage evidence, not final standalone-drug coverage; confirm exact product, strength, form, and tier in the carrier formulary.{generic_note} {count_detail}.",
+                f"{match_note}CMS found generic coverage for {prescription['drug_name']}.{tier_sentence} Treat this as related coverage evidence, not final standalone-drug coverage; confirm exact product, strength, form, and tier in the carrier formulary.{generic_note} {count_detail}.",
+                tier_label=tier_label,
+                tier_detail=tier_detail,
+                restriction_label=restriction_label,
             )
         if len(generic_plan_ids) < len(plan_ids):
             return make_network_status(
                 "partial_coverage",
                 "CMS Marketplace API",
-                f"{match_note}CMS shows a generic equivalent covered in {len(generic_plan_ids)} of {len(plan_ids)} matching plan IDs.{generic_note} {count_detail}.",
+                f"{match_note}CMS shows a generic equivalent covered in {len(generic_plan_ids)} of {len(plan_ids)} matching plan IDs.{tier_sentence}{generic_note} {count_detail}.",
+                tier_label=tier_label,
+                tier_detail=tier_detail,
+                restriction_label=restriction_label,
             )
         if match_note:
             return make_network_status(
                 "review_exact_drug",
                 "CMS Marketplace API",
-                f"{match_note}CMS shows a generic equivalent covered in all {len(plan_ids)} matching plan IDs. Confirm whether the brand or only the generic is covered before telling a client it is covered.{generic_note} {count_detail}.",
+                f"{match_note}CMS shows a generic equivalent covered in all {len(plan_ids)} matching plan IDs.{tier_sentence} Confirm whether the brand or only the generic is covered before telling a client it is covered.{generic_note} {count_detail}.",
+                tier_label=tier_label,
+                tier_detail=tier_detail,
+                restriction_label=restriction_label,
             )
         return make_network_status(
             "generic_covered",
             "CMS Marketplace API",
-            f"CMS shows a generic equivalent covered in {len(generic_plan_ids)} of {len(plan_ids)} matching plan IDs.{generic_note} {count_detail}.",
+            f"CMS shows a generic equivalent covered in {len(generic_plan_ids)} of {len(plan_ids)} matching plan IDs.{tier_sentence}{generic_note} {count_detail}.",
+            tier_label=tier_label,
+            tier_detail=tier_detail,
+            restriction_label=restriction_label,
         )
 
     related_status = related_rxcui_coverage_status(
@@ -3499,6 +4072,21 @@ def parse_prescriptions(prescription_input):
     return prescriptions
 
 
+def parse_prescription_selections(selection_input):
+    if not selection_input:
+        return []
+    try:
+        selections = json.loads(selection_input)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(selections, list):
+        return []
+    return [
+        selection for selection in selections
+        if isinstance(selection, dict) and selection.get("rxcui")
+    ]
+
+
 def provider_result_group(requested_provider_type, resolved_provider_type):
     if requested_provider_type in {"doctor", "facility"}:
         return requested_provider_type
@@ -3517,12 +4105,22 @@ def sources_status():
     return jsonify(source_freshness_summary())
 
 
+@app.route("/drugs/search")
+def drugs_search():
+    query = request.args.get("q", "").strip()
+    if len(query) < 2:
+        return jsonify({"drugs": []})
+    drugs = [serialize_drug_candidate(drug) for drug in search_drugs(query, limit=25)]
+    return jsonify({"drugs": drugs})
+
+
 @app.route("/search")
 def search():
     legacy_providers_input = request.args.get("providers", "")
     doctors_input = request.args.get("doctors", "")
     facilities_input = request.args.get("facilities", "")
     prescriptions_input = request.args.get("prescriptions", "")
+    prescription_selections_input = request.args.get("prescription_selections", "")
     provider_type = normalize_provider_type(request.args.get("provider_type", "auto"))
     location = request.args.get("location", "dallas").lower()
     radius = int(request.args.get("radius", 25))
@@ -3535,6 +4133,7 @@ def search():
     doctors.extend(parse_doctors(doctors_input, provider_type="doctor"))
     doctors.extend(parse_doctors(facilities_input, provider_type="facility"))
     doctors.extend(parse_doctors(legacy_providers_input, provider_type=provider_type))
+    prescription_selections = parse_prescription_selections(prescription_selections_input)
     prescription_names = parse_prescriptions(prescriptions_input)
     base_networks = build_networks(generate_bcbstx_urls("", lat, lon, radius), generate_uhc_urls())
 
@@ -3569,7 +4168,19 @@ def search():
         })
 
     prescription_results = []
+    selected_names = {
+        (selection.get("display_name") or "").strip()
+        for selection in prescription_selections
+    }
+    for selection in prescription_selections:
+        prescription = resolve_selected_prescription(selection)
+        prescription["network_statuses"] = check_prescription_statuses(
+            prescription, base_networks, marketplace_place
+        )
+        prescription_results.append(prescription)
     for prescription_name in prescription_names:
+        if prescription_name in selected_names:
+            continue
         prescription = resolve_prescription(prescription_name)
         prescription["network_statuses"] = check_prescription_statuses(
             prescription, base_networks, marketplace_place

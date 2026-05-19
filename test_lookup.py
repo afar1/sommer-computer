@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from urllib.parse import quote
 from unittest.mock import patch
 
 import app as web_app
@@ -571,6 +572,63 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(result["rxcui"], "197805")
         self.assertEqual(params["q"], "Ibuprofen")
 
+    def test_drug_search_route_returns_picker_candidates(self):
+        drug_payload = [
+            {
+                "rxcui": "259255",
+                "name": "Atorvastatin",
+                "strength": "80 mg",
+                "route": "Oral Pill",
+                "full_name": "atorvastatin 80 MG Oral Tablet",
+                "rxnorm_dose_form": "Oral Tablet",
+            },
+            {
+                "rxcui": "153165",
+                "name": "LIPITOR",
+                "strength": "20 mg",
+                "route": "Oral Pill",
+                "full_name": "atorvastatin 20 MG Oral Tablet [Lipitor]",
+                "rxnorm_dose_form": "Oral Tablet",
+            },
+        ]
+
+        with patch.object(web_app.requests, "get") as mock_get:
+            mock_get.return_value = FakeResponse(drug_payload)
+            client = web_app.app.test_client()
+            response = client.get("/drugs/search?q=atorvastatin")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["drugs"][0]["rxcui"], "259255")
+        self.assertEqual(response.json["drugs"][0]["coverage_type"], "Generic")
+        self.assertEqual(response.json["drugs"][1]["coverage_type"], "Branded")
+        self.assertIn("Atorvastatin 80 mg Oral Tablet", response.json["drugs"][0]["display_name"])
+
+    def test_route_uses_exact_prescription_selection_rxcui(self):
+        selection = [{
+            "rxcui": "259255",
+            "name": "Atorvastatin",
+            "strength": "80 mg",
+            "route": "Oral Pill",
+            "full_name": "atorvastatin 80 MG Oral Tablet",
+            "display_name": "Atorvastatin 80 mg Oral Tablet",
+            "coverage_type": "Generic",
+            "dose_form": "Oral Tablet",
+        }]
+
+        with patch.object(web_app, "search_npi", return_value=[]), \
+             patch.object(web_app, "check_prescription_statuses", return_value={}):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?prescriptions=Atorvastatin+80+mg+Oral+Tablet"
+                "&prescription_selections=" + quote(json.dumps(selection))
+            )
+
+        self.assertEqual(response.status_code, 200)
+        prescription = response.json["prescriptions"][0]
+        self.assertEqual(prescription["rxcui"], "259255")
+        self.assertTrue(prescription["selected_from_picker"])
+        self.assertEqual(prescription["drug_match_count"], 1)
+
     def test_prescription_resolution_flags_combination_match_for_broad_input(self):
         drug_payload = [
             {
@@ -706,6 +764,46 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(status["status"], "review_exact_drug")
         self.assertIn("Selected RxCUI 12345 from 3 CMS autocomplete matches", status["detail"])
         self.assertIn("Confirm exact product, strength, form, and tier", status["detail"])
+
+    def test_marketplace_drug_lookup_includes_tier_when_source_provides_it(self):
+        network = {
+            "id": "bcbstx:blue_advantage_hmo",
+            "name": "Blue Advantage HMO",
+            "marketplace_issuer": "Blue Cross and Blue Shield of Texas",
+            "plan_year": 2026,
+        }
+        place = {"zipcode": "77030", "countyfips": "48201", "state": "TX"}
+        prescription = {
+            "prescription": "Atorvastatin 80 mg Oral Tablet",
+            "drug_found": True,
+            "rxcui": "259255",
+            "drug_name": "Atorvastatin 80 mg Oral Pill",
+        }
+        coverage_payload = {
+            "coverage": [
+                {
+                    "rxcui": "259255",
+                    "plan_id": "plan-1",
+                    "coverage": "Covered",
+                    "tier": "1",
+                    "prior_authorization": True,
+                    "quantity_limit": "true",
+                },
+            ]
+        }
+
+        with patch.object(web_app, "get_marketplace_plan_ids", return_value=("plan-1",)), \
+             patch.object(web_app.requests, "get") as mock_get:
+            mock_get.return_value = FakeResponse(coverage_payload)
+            status = web_app.check_marketplace_drug_status(
+                prescription, network, place
+            )
+
+        self.assertEqual(status["status"], "drug_covered")
+        self.assertEqual(status["tier_label"], "T1")
+        self.assertEqual(status["tier_detail"], "Tier: Tier 1")
+        self.assertEqual(status["restriction_label"], "PA QL")
+        self.assertIn("Tier: Tier 1", status["detail"])
 
     def test_marketplace_drug_lookup_marks_other_form_covered_when_related_rxcui_is_covered(self):
         network = {
@@ -855,6 +953,10 @@ class LookupTests(unittest.TestCase):
         self.assertIn('id="doctors"', html)
         self.assertIn('id="facilities"', html)
         self.assertIn('id="prescriptions"', html)
+        self.assertIn('id="prescriptionSelections"', html)
+        self.assertIn("Add a prescription", html)
+        self.assertIn("/drugs/search", html)
+        self.assertIn("Exact RxCUI selection reduces broad-name ambiguity", html)
         self.assertIn("CMS = screening, carrier formulary = final", html)
         self.assertIn("return 'Generic covered';", html)
         self.assertIn("Review exact drug", html)
@@ -867,6 +969,7 @@ class LookupTests(unittest.TestCase):
         self.assertIn("selected from", html)
         self.assertIn("Suspect", html)
         self.assertIn("Selected RxCUI not covered; exact drug may differ", html)
+        self.assertIn("return [info.tier_label, info.restriction_label].filter(Boolean).join(' ');", html)
         self.assertIn("Coverage found; confirm exact NPI/location", html)
         self.assertIn("Coverage evidence found; confirm exact drug/form", html)
         self.assertIn("Only some matched plan IDs covered", html)
