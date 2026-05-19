@@ -1439,6 +1439,9 @@ HTML_TEMPLATE = """
             padding: 7px 8px;
             text-align: left;
         }
+        .matrix-status-card.formulary-split {
+            gap: 8px;
+        }
         .matrix-status-card.in {
             background: #e7f8eb;
             border-color: #9bd8aa;
@@ -1564,6 +1567,31 @@ HTML_TEMPLATE = """
             font-size: 11px;
             font-weight: 800;
             opacity: 0.82;
+        }
+        .formulary-tier-grid {
+            display: grid;
+            gap: 6px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .formulary-tier-column {
+            border-left: 1px solid rgba(6, 78, 59, 0.18);
+            min-width: 0;
+            padding-left: 6px;
+        }
+        .formulary-tier-name {
+            color: currentColor;
+            font-size: 10px;
+            font-weight: 900;
+            line-height: 1.1;
+            opacity: 0.68;
+            text-transform: uppercase;
+        }
+        .formulary-tier-value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 850;
+            line-height: 1.2;
+            margin-top: 3px;
         }
         .row-total {
             color: var(--ink-soft);
@@ -2930,6 +2958,11 @@ HTML_TEMPLATE = """
             if (info.tier_detail) {
                 parts.push(info.tier_detail);
             }
+            for (const tier of info.formulary_tiers || []) {
+                if (tier.formulary_name && tier.tier_detail) {
+                    parts.push(`${tier.formulary_name}: ${tier.tier_detail}`);
+                }
+            }
             if (detail && detail !== reason) {
                 parts.push(detail);
             }
@@ -3270,21 +3303,57 @@ HTML_TEMPLATE = """
             html += `<div class="lookup-item-meta">${prescriptionMatchSummary(result)}</div>`;
             html += '</div>';
             html += '</td>';
-            html += renderStatusCells(result.network_statuses || {}, networks);
+            html += renderStatusCells(result.network_statuses || {}, networks, 'prescription');
             html += renderRowTotal(result.network_statuses || {}, networks);
             html += '</tr>';
             return html;
         }
 
-        function renderStatusCells(statuses, networks) {
+        function renderStatusCells(statuses, networks, itemType) {
             let html = '';
             for (const [index, network] of networks.entries()) {
                 const statusInfo = statuses[network.id];
                 html += `<td class="network-cell" data-column-index="${index + 1}"${tooltipAttribute(networkStatusTooltip(statusInfo))}>`;
-                html += renderMatrixStatus(statusInfo);
+                html += itemType === 'prescription' ? renderPrescriptionMatrixStatus(statusInfo) : renderMatrixStatus(statusInfo);
                 html += '</td>';
             }
             return html;
+        }
+
+        function renderPrescriptionMatrixStatus(statusInfo) {
+            const tiers = (statusInfo && statusInfo.formulary_tiers || []).filter(tier => tier && tier.formulary_name);
+            if (tiers.length < 2) {
+                return renderMatrixStatus(statusInfo);
+            }
+            const info = statusInfo || { status: 'no_result', detail: 'No lookup result', source: 'No result' };
+            const status = info.status || 'no_result';
+            const label = networkStatusLabel(status);
+            const source = (info.source || '').toLowerCase().includes('cms') ? 'CMS' : '';
+            let html = `<div class="matrix-status-card formulary-split ${matrixStatusClass(status)}">`;
+            html += '<div class="matrix-status-top">';
+            html += `<span class="matrix-status-icon">${networkStatusIcon(status) || '&middot;'}</span>`;
+            html += `<span class="matrix-status-label">${escapeHtml(label)}</span>`;
+            if (source) {
+                html += `<span class="matrix-source">${source}</span>`;
+            }
+            html += '</div>';
+            html += '<div class="formulary-tier-grid">';
+            for (const tier of tiers) {
+                html += '<div class="formulary-tier-column">';
+                html += `<div class="formulary-tier-name">${escapeHtml(tier.formulary_name)}</div>`;
+                html += `<div class="formulary-tier-value">${escapeHtml(formularyTierDetail(tier))}</div>`;
+                html += '</div>';
+            }
+            html += '</div>';
+            html += '</div>';
+            return html;
+        }
+
+        function formularyTierDetail(tier) {
+            if (tier.tier_label) {
+                return [tier.tier_label, tier.restriction_label].filter(Boolean).join(' ');
+            }
+            return tier.tier_detail || 'Tier not found';
         }
 
         function renderRowTotal(statuses, networks) {
@@ -4170,24 +4239,40 @@ def search_formulary_text_for_tier(text, terms):
 
 
 def lookup_formulary_tier(prescription, network):
-    terms = formulary_lookup_terms(prescription)
-    if not terms:
-        return {}
-    for source in formulary_sources_for_network(network):
-        try:
-            text = formulary_pdf_text(source["url"])
-        except (requests.RequestException, ValueError):
-            continue
-        match = search_formulary_text_for_tier(text, terms)
-        if match:
-            match["formulary_name"] = source["name"]
-            return match
+    for tier in lookup_formulary_tiers(prescription, network):
+        if tier.get("tier_label"):
+            return tier
     return {}
 
 
+def lookup_formulary_tiers(prescription, network):
+    terms = formulary_lookup_terms(prescription)
+    if not terms:
+        return []
+    tiers = []
+    for source in formulary_sources_for_network(network):
+        tier = {
+            "formulary_name": source["name"],
+            "tier_label": "",
+            "tier_detail": "",
+            "restriction_label": "",
+        }
+        try:
+            text = formulary_pdf_text(source["url"])
+        except (requests.RequestException, ValueError):
+            tier["tier_detail"] = "Formulary unavailable"
+            tiers.append(tier)
+            continue
+        match = search_formulary_text_for_tier(text, terms)
+        if match:
+            tier.update(match)
+        else:
+            tier["tier_detail"] = "Tier not found"
+        tiers.append(tier)
+    return tiers
+
+
 def enrich_status_with_formulary_tier(status, prescription, network):
-    if status.get("tier_label"):
-        return status
     if status.get("status") not in {
         "drug_covered",
         "generic_covered",
@@ -4197,7 +4282,16 @@ def enrich_status_with_formulary_tier(status, prescription, network):
         "related_product_covered",
     }:
         return status
-    formulary_tier = lookup_formulary_tier(prescription, network)
+    sources = formulary_sources_for_network(network)
+    if status.get("tier_label") and len(sources) < 2:
+        return status
+    formulary_tiers = lookup_formulary_tiers(prescription, network)
+    matched_tiers = [tier for tier in formulary_tiers if tier.get("tier_label")]
+    formulary_tier = matched_tiers[0] if matched_tiers else {}
+    if status.get("tier_label") and formulary_tiers:
+        enriched = dict(status)
+        enriched["formulary_tiers"] = formulary_tiers
+        return enriched
     if not formulary_tier:
         return status
     enriched = dict(status)
@@ -4206,6 +4300,7 @@ def enrich_status_with_formulary_tier(status, prescription, network):
         "tier_label": formulary_tier["tier_label"],
         "tier_detail": formulary_tier["tier_detail"],
         "restriction_label": formulary_tier.get("restriction_label", ""),
+        "formulary_tiers": formulary_tiers,
         "detail": (
             status.get("detail", "") +
             f" Carrier formulary {formulary_tier.get('formulary_name', '')} shows {formulary_tier['tier_detail']}."

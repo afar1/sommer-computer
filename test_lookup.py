@@ -768,6 +768,47 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(enriched["restriction_label"], "AC")
         self.assertIn("Carrier formulary", enriched["source"])
 
+    def test_prescription_status_keeps_blue_advantage_formulary_tiers_split(self):
+        prescription = {
+            "prescription": "Atorvastatin 80 mg Oral Tablet",
+            "drug_found": True,
+            "rxcui": "259255",
+            "drug_name": "Atorvastatin 80 mg Oral Pill",
+            "drug_results": [{"name": "Atorvastatin"}],
+        }
+        network = {
+            "id": "bcbstx:blue_advantage_hmo",
+            "carrier": "BCBSTX",
+            "name": "Blue Advantage HMO",
+        }
+        status = {
+            "status": "drug_covered",
+            "source": "CMS Marketplace API",
+            "detail": "CMS shows coverage.",
+            "tier_label": "Tier 1",
+            "tier_detail": "Tier: Tier 1",
+        }
+
+        def fake_formulary_text(url):
+            if "4T" in url:
+                return "atorvastatin calcium tab 10 mg, 20 mg, 40 mg, 80 mg (Lipitor) 1 AC"
+            return "atorvastatin calcium tab 10 mg, 20 mg, 40 mg, 80 mg (Lipitor) 2 PA"
+
+        with patch.object(web_app, "formulary_pdf_text", side_effect=fake_formulary_text):
+            enriched = web_app.enrich_status_with_formulary_tier(
+                status, prescription, network
+            )
+
+        self.assertEqual(enriched["tier_label"], "Tier 1")
+        self.assertEqual(
+            [tier["formulary_name"] for tier in enriched["formulary_tiers"]],
+            ["4-Tier", "6-Tier"],
+        )
+        self.assertEqual(enriched["formulary_tiers"][0]["tier_label"], "Tier 1")
+        self.assertEqual(enriched["formulary_tiers"][0]["restriction_label"], "AC")
+        self.assertEqual(enriched["formulary_tiers"][1]["tier_label"], "Tier 2")
+        self.assertEqual(enriched["formulary_tiers"][1]["restriction_label"], "PA")
+
     def test_route_uses_exact_prescription_selection_rxcui(self):
         selection = [{
             "rxcui": "259255",
@@ -1146,6 +1187,10 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Selected RxCUI not covered; exact drug may differ", html)
         self.assertIn("info.tier_label", html)
         self.assertIn("Tier not returned", html)
+        self.assertIn("formulary-split", html)
+        self.assertIn("formulary-tier-grid", html)
+        self.assertIn("formularyTierDetail", html)
+        self.assertIn("formulary_name", html)
         self.assertIn("Coverage found; confirm exact NPI/location", html)
         self.assertIn("Coverage evidence found; confirm exact drug/form", html)
         self.assertIn("Only some matched plan IDs covered", html)
