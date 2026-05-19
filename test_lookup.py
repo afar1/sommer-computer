@@ -86,6 +86,55 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(providers[1]["provider"], "Baylor Hospital")
         self.assertEqual(providers[1]["provider_type"], "facility")
 
+    def test_web_route_resolves_doctors_and_facilities_separately(self):
+        def fake_search(name, **kwargs):
+            if name == "Maria Garcia" and kwargs["provider_type"] == "doctor":
+                return [{"npi": "1", "name": "Maria Garcia"}]
+            if name == "Baylor Scott White" and kwargs["provider_type"] == "facility":
+                return [{"npi": "2", "name": "BAYLOR SCOTT WHITE"}]
+            return []
+
+        prescription = {"prescription": "Ozempic", "drug_found": False}
+
+        with patch.object(web_app, "search_npi", side_effect=fake_search), \
+             patch.object(web_app, "check_network_statuses", return_value={}), \
+             patch.object(web_app, "resolve_prescription", return_value=prescription), \
+             patch.object(web_app, "check_prescription_statuses", return_value={}):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?doctors=Maria+Garcia&facilities=Baylor+Scott+White&prescriptions=Ozempic"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        providers = response.json["providers"]
+        self.assertEqual(providers[0]["provider"], "Maria Garcia")
+        self.assertEqual(providers[0]["provider_type"], "doctor")
+        self.assertEqual(providers[0]["provider_group"], "doctor")
+        self.assertEqual(providers[1]["provider"], "Baylor Scott White")
+        self.assertEqual(providers[1]["provider_type"], "facility")
+        self.assertEqual(providers[1]["provider_group"], "facility")
+
+    def test_facility_search_queries_include_baylor_scott_white_aliases(self):
+        queries = web_app.facility_search_queries("bailer scott and white")
+
+        self.assertIn("baylor scott and white", queries)
+        self.assertIn("Baylor Scott White", queries)
+        self.assertIn("Baylor University Medical Center", queries)
+
+    def test_auto_prefers_facility_for_facility_like_query_even_with_doctor_match(self):
+        def fake_search(name, **kwargs):
+            if kwargs["provider_type"] == "doctor":
+                return [{"npi": "1", "name": "Baylor White"}]
+            if kwargs["provider_type"] == "facility":
+                return [{"npi": "2", "name": "BAYLOR UNIVERSITY MEDICAL CENTER"}]
+            return []
+
+        with patch.object(web_app, "search_npi", side_effect=fake_search):
+            results, provider_type = web_app.resolve_provider_npi("scott white")
+
+        self.assertEqual(provider_type, "facility")
+        self.assertEqual(results[0]["name"], "BAYLOR UNIVERSITY MEDICAL CENTER")
+
     def test_web_route_tags_unresolved_provider_as_not_found(self):
         with patch.object(web_app, "search_npi", return_value=[]):
             client = web_app.app.test_client()
@@ -798,9 +847,13 @@ class LookupTests(unittest.TestCase):
         self.assertNotIn("Client-safe summary", html)
         self.assertIn("Case · Provider Network Checker", html)
         self.assertIn("Run check", html)
-        self.assertIn("Coverage by NPI match against carrier rosters", html)
-        self.assertIn("Providers", html)
+        self.assertIn("Coverage by individual NPI match against carrier rosters", html)
+        self.assertIn("Coverage by organization NPI match against carrier rosters", html)
+        self.assertIn("Doctors", html)
+        self.assertIn("Facilities", html)
         self.assertIn("Prescriptions", html)
+        self.assertIn('id="doctors"', html)
+        self.assertIn('id="facilities"', html)
         self.assertIn('id="prescriptions"', html)
         self.assertIn("CMS = screening, carrier formulary = final", html)
         self.assertIn("return 'Generic covered';", html)
@@ -848,8 +901,10 @@ class LookupTests(unittest.TestCase):
         self.assertIn("No result", html)
         self.assertIn("network-matrix", html)
         self.assertIn("network-status", html)
-        self.assertIn("Dr. John Doe, Baylor Hospital, Kelsey Seybold Clinic", html)
-        self.assertIn("Doctors and facilities can be mixed", html)
+        self.assertIn("Dr. John Doe, Maria Garcia", html)
+        self.assertIn("Baylor Scott & White, Houston Methodist Hospital, Kelsey Seybold Clinic", html)
+        self.assertIn("These search individual NPI records", html)
+        self.assertIn("These search organization NPI records", html)
         self.assertNotIn(">Item</th>", html)
         self.assertNotIn("status-toggle", html)
         self.assertNotIn("providerNetworkStatuses", html)

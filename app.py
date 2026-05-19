@@ -1625,12 +1625,19 @@ HTML_TEMPLATE = """
 
     <form id="searchForm" class="search-form">
         <section class="intake-block">
-            <div class="intake-block-title">Client meds & providers</div>
+            <div class="intake-block-title">Client doctors, facilities & prescriptions</div>
             <div class="form-group">
-                <label for="doctors">Provider Name(s)</label>
+                <label for="doctors">Doctor Name(s)</label>
                 <textarea id="doctors" name="doctors" rows="2"
-                          placeholder="e.g., Dr. John Doe, Baylor Hospital, Kelsey Seybold Clinic"></textarea>
-                <p class="hint">Separate names with commas. Doctors and facilities can be mixed; each row is tagged Doctor, Facility, or Not found.</p>
+                          placeholder="e.g., Dr. John Doe, Maria Garcia"></textarea>
+                <p class="hint">Separate names with commas. These search individual NPI records.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="facilities">Facility Name(s)</label>
+                <textarea id="facilities" name="facilities" rows="2"
+                          placeholder="e.g., Baylor Scott & White, Houston Methodist Hospital, Kelsey Seybold Clinic"></textarea>
+                <p class="hint">Separate names with commas. These search organization NPI records, so partial facility names can still return multiple matches.</p>
             </div>
 
             <div class="form-group">
@@ -1704,28 +1711,32 @@ HTML_TEMPLATE = """
     <script>
         const sampleScenarios = {
             'dallas-specialty': {
-                providers: 'John Smith (Physician Assistant), Baylor University Medical Center (General Acute)',
+                doctors: 'John Smith (Physician Assistant)',
+                facilities: 'Baylor University Medical Center (General Acute)',
                 prescriptions: 'Ibuprofen, Levothyroxine',
                 location: 'dallas',
                 radius: '25',
                 city: 'Dallas',
             },
             'houston-mix': {
-                providers: 'Maria Garcia, Houston Methodist Hospital, Kelsey Seybold Clinic',
+                doctors: 'Maria Garcia',
+                facilities: 'Houston Methodist Hospital, Kelsey Seybold Clinic',
                 prescriptions: 'Ozempic, Metformin',
                 location: 'houston',
                 radius: '25',
                 city: 'Houston',
             },
             'austin-mix': {
-                providers: "Sarah Lee, St. David's Medical Center, Ascension Seton Medical Center Austin",
+                doctors: 'Sarah Lee',
+                facilities: "St. David's Medical Center, Ascension Seton Medical Center Austin",
                 prescriptions: 'Humira, Albuterol',
                 location: 'austin',
                 radius: '25',
                 city: 'Austin',
             },
             'san-antonio-wide': {
-                providers: 'Juan Martinez, Methodist Hospital, University Hospital',
+                doctors: 'Juan Martinez',
+                facilities: 'Methodist Hospital, University Hospital',
                 prescriptions: 'Atorvastatin, Lisinopril',
                 location: 'san antonio',
                 radius: '50',
@@ -1811,7 +1822,8 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            document.getElementById('doctors').value = scenario.providers;
+            document.getElementById('doctors').value = scenario.doctors || scenario.providers || '';
+            document.getElementById('facilities').value = scenario.facilities || '';
             document.getElementById('prescriptions').value = scenario.prescriptions || '';
             document.getElementById('location').value = scenario.location;
             document.getElementById('radius').value = scenario.radius;
@@ -2339,14 +2351,29 @@ HTML_TEMPLATE = """
             html += '<th class="row-total-header" data-column-index="total"><span class="plan-arrow">Row total</span></th>';
             html += '</tr></thead><tbody>';
 
-            if (providerResults.length) {
+            const doctorResults = providerResults.filter(result => providerGroup(result) === 'doctor');
+            const facilityResults = providerResults.filter(result => providerGroup(result) === 'facility');
+
+            if (doctorResults.length) {
                 html += renderLookupSection(
-                    'Providers',
-                    'Coverage by NPI match against carrier rosters',
+                    'Doctors',
+                    'Coverage by individual NPI match against carrier rosters',
                     networks.length + 2,
-                    providerResults.length
+                    doctorResults.length
                 );
-                for (const result of providerResults) {
+                for (const result of doctorResults) {
+                    html += renderProviderLookupRow(result, networks);
+                }
+            }
+
+            if (facilityResults.length) {
+                html += renderLookupSection(
+                    'Facilities',
+                    'Coverage by organization NPI match against carrier rosters',
+                    networks.length + 2,
+                    facilityResults.length
+                );
+                for (const result of facilityResults) {
                     html += renderProviderLookupRow(result, networks);
                 }
             }
@@ -2392,6 +2419,16 @@ HTML_TEMPLATE = """
             }
             html += '</th>';
             return html;
+        }
+
+        function providerGroup(result) {
+            if (result.provider_group === 'facility') {
+                return 'facility';
+            }
+            if (result.provider_group === 'doctor') {
+                return 'doctor';
+            }
+            return result.provider_type === 'facility' ? 'facility' : 'doctor';
         }
 
         function renderLookupSection(title, copy, colspan, count) {
@@ -2624,6 +2661,82 @@ def normalize_provider_type(provider_type):
     return "auto"
 
 
+FACILITY_HINTS = {
+    "baylor",
+    "center",
+    "clinic",
+    "facility",
+    "health",
+    "hospital",
+    "medical",
+    "methodist",
+    "scott",
+    "university",
+    "white",
+}
+
+
+def provider_query_has_facility_hint(name):
+    words = set(normalize_search_text(name).split())
+    return bool(words & FACILITY_HINTS)
+
+
+def unique_search_queries(queries):
+    unique = []
+    seen = set()
+    for query in queries:
+        query = " ".join(str(query).replace("&", " ").split())
+        if not query:
+            continue
+        key = normalize_search_text(query)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(query)
+    return unique
+
+
+def facility_search_queries(name):
+    normalized = normalize_search_text(name)
+    corrected = normalized.replace("bailer", "baylor")
+    queries = [name]
+    if corrected != normalized:
+        queries.append(corrected)
+    if "scott white" in corrected or "baylor scott" in corrected:
+        queries.extend([
+            "Baylor Scott White",
+            "Baylor Scott and White",
+            "Baylor University Medical Center",
+        ])
+    return unique_search_queries(queries)
+
+
+def provider_search_queries(name, provider_type):
+    if provider_type == "facility":
+        return facility_search_queries(name)
+    return unique_search_queries([name])
+
+
+def search_provider_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="doctor"):
+    results = []
+    seen_npis = set()
+    for query in provider_search_queries(name, provider_type):
+        query_results = search_npi(
+            query, state=state, city=city, specialty=specialty,
+            limit=limit, provider_type=provider_type
+        )
+        for result in query_results:
+            npi = result.get("npi")
+            if npi and npi in seen_npis:
+                continue
+            if npi:
+                seen_npis.add(npi)
+            results.append(result)
+            if len(results) >= limit:
+                return results
+    return results
+
+
 def search_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="doctor"):
     """Search the NPI Registry for providers."""
     provider_type = "facility" if provider_type == "facility" else "doctor"
@@ -2706,23 +2819,26 @@ def resolve_provider_npi(name, state="TX", city=None, specialty=None, limit=10, 
     provider_type = normalize_provider_type(provider_type)
 
     if provider_type in {"doctor", "facility"}:
-        results = search_npi(
+        results = search_provider_npi(
             name, state=state, city=city, specialty=specialty,
             limit=limit, provider_type=provider_type
         )
         return results, provider_type if results else "not_found"
 
-    doctor_results = search_npi(
+    doctor_results = search_provider_npi(
         name, state=state, city=city, specialty=specialty,
         limit=limit, provider_type="doctor"
     )
-    if doctor_results:
-        return doctor_results, "doctor"
-
-    facility_results = search_npi(
+    facility_results = search_provider_npi(
         name, state=state, city=city, specialty=specialty,
         limit=limit, provider_type="facility"
     )
+    if facility_results and provider_query_has_facility_hint(name):
+        return facility_results, "facility"
+
+    if doctor_results:
+        return doctor_results, "doctor"
+
     if facility_results:
         return facility_results, "facility"
 
@@ -3383,6 +3499,14 @@ def parse_prescriptions(prescription_input):
     return prescriptions
 
 
+def provider_result_group(requested_provider_type, resolved_provider_type):
+    if requested_provider_type in {"doctor", "facility"}:
+        return requested_provider_type
+    if resolved_provider_type in {"doctor", "facility"}:
+        return resolved_provider_type
+    return "doctor"
+
+
 @app.route("/")
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -3395,7 +3519,9 @@ def sources_status():
 
 @app.route("/search")
 def search():
-    doctors_input = request.args.get("providers", request.args.get("doctors", ""))
+    legacy_providers_input = request.args.get("providers", "")
+    doctors_input = request.args.get("doctors", "")
+    facilities_input = request.args.get("facilities", "")
     prescriptions_input = request.args.get("prescriptions", "")
     provider_type = normalize_provider_type(request.args.get("provider_type", "auto"))
     location = request.args.get("location", "dallas").lower()
@@ -3405,7 +3531,10 @@ def search():
     lat, lon = TEXAS_LOCATIONS.get(location, TEXAS_LOCATIONS["dallas"])
     marketplace_place = TEXAS_MARKETPLACE_PLACES.get(location, TEXAS_MARKETPLACE_PLACES["dallas"])
 
-    doctors = parse_doctors(doctors_input, provider_type=provider_type)
+    doctors = []
+    doctors.extend(parse_doctors(doctors_input, provider_type="doctor"))
+    doctors.extend(parse_doctors(facilities_input, provider_type="facility"))
+    doctors.extend(parse_doctors(legacy_providers_input, provider_type=provider_type))
     prescription_names = parse_prescriptions(prescriptions_input)
     base_networks = build_networks(generate_bcbstx_urls("", lat, lon, radius), generate_uhc_urls())
 
@@ -3427,6 +3556,8 @@ def search():
             "provider": doctor["name"],
             "doctor": doctor["name"],
             "provider_type": resolved_provider_type,
+            "requested_provider_type": doctor["provider_type"],
+            "provider_group": provider_result_group(doctor["provider_type"], resolved_provider_type),
             "specialty_filter": doctor["specialty"],
             "npi_found": len(npi_results) > 0,
             "npi_count": len(npi_results),
