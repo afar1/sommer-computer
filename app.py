@@ -6,6 +6,7 @@ Web interface for Provider Network Checker
 from collections import Counter
 from datetime import datetime, timezone
 from functools import lru_cache
+from io import BytesIO
 import hashlib
 import json
 import os
@@ -15,6 +16,11 @@ import sys
 from flask import Flask, render_template_string, request, jsonify
 import requests
 from urllib.parse import quote
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 app = Flask(__name__)
 
@@ -2070,11 +2076,6 @@ HTML_TEMPLATE = """
             </div>
             <div class="modal-body">
                 <p class="modal-copy">Search by generic or brand name, then choose the exact option when you know it.</p>
-                <div class="form-group">
-                    <label for="formularySource">Formulary source</label>
-                    <select id="formularySource"></select>
-                    <p class="hint">Drug matching still uses CMS autocomplete; this selects the carrier formulary context for final confirmation.</p>
-                </div>
                 <div class="drug-search-wrap">
                     <input type="search" id="drugSearchInput" placeholder="Enter a prescription name" autocomplete="off">
                     <button type="button" class="drug-clear" id="clearDrugSearch">Clear</button>
@@ -2128,14 +2129,6 @@ HTML_TEMPLATE = """
             },
         };
 
-        const formularySources = [
-            { value: 'bcbstx:4-tier', carrier: 'bcbstx', label: 'Blue Cross and Blue Shield of Texas · 4-Tier', source_name: '4-Tier' },
-            { value: 'bcbstx:6-tier', carrier: 'bcbstx', label: 'Blue Cross and Blue Shield of Texas · 6-Tier', source_name: '6-Tier' },
-            { value: 'uhc:individual-exchange-hmo', carrier: 'uhc', label: 'UnitedHealthcare · Individual Exchange HMO', source_name: 'Individual Exchange HMO' },
-            { value: 'oscar:4-tier', carrier: 'oscar', label: 'Oscar · 4-Tier', source_name: '4-Tier' },
-            { value: 'oscar:6-tier', carrier: 'oscar', label: 'Oscar · 6-Tier', source_name: '6-Tier' },
-        ];
-
         const searchForm = document.getElementById('searchForm');
         const sourceStatusDiv = document.getElementById('sourceStatus');
         const resultsDiv = document.getElementById('results');
@@ -2151,7 +2144,6 @@ HTML_TEMPLATE = """
         const selectedPrescriptionsDiv = document.getElementById('selectedPrescriptions');
         const modalSelectedPrescriptionsDiv = document.getElementById('modalSelectedPrescriptions');
         const prescriptionModal = document.getElementById('prescriptionModal');
-        const formularySourceSelect = document.getElementById('formularySource');
         const drugSearchInput = document.getElementById('drugSearchInput');
         const drugSearchResults = document.getElementById('drugSearchResults');
         const carrierInputs = Array.from(document.querySelectorAll('input[name="carriers"]'));
@@ -2283,17 +2275,12 @@ HTML_TEMPLATE = """
         });
         selectedPrescriptionsDiv.addEventListener('click', removePrescriptionFromClick);
         modalSelectedPrescriptionsDiv.addEventListener('click', removePrescriptionFromClick);
-        carrierInputs.forEach(function(input) {
-            input.addEventListener('change', updateFormularySourceOptions);
-        });
-
         const initialSample = new URLSearchParams(window.location.search).get('sample');
         if (initialSample && sampleScenarios[initialSample]) {
             applyScenario(initialSample);
         }
         syncFacilitySelectionInputs();
         syncPrescriptionSelectionInputs();
-        updateFormularySourceOptions();
         loadSourceStatus();
 
         function applyScenario(sampleId) {
@@ -2429,7 +2416,6 @@ HTML_TEMPLATE = """
         }
 
         function openPrescriptionModal() {
-            updateFormularySourceOptions();
             prescriptionModal.hidden = false;
             renderSelectedPrescriptions();
             window.setTimeout(function() {
@@ -2467,15 +2453,14 @@ HTML_TEMPLATE = """
         }
 
         function prescriptionMeta(item) {
-            const source = item.formulary_source && item.formulary_source.label;
             const matches = item.formulary_matches || [];
             const matchLabel = matches.length
                 ? 'In formulary: ' + matches.map(match => match.carrier).filter(Boolean).join(', ')
                 : '';
             if (item.selection_type === 'text') {
-                return ['Broad name', matchLabel || source].filter(Boolean).join(' · ');
+                return ['Broad name', matchLabel].filter(Boolean).join(' · ');
             }
-            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '', matchLabel || source]
+            return [item.coverage_type, item.dose_form, item.rxcui ? `RxCUI ${item.rxcui}` : '', matchLabel]
                 .filter(Boolean)
                 .join(' · ');
         }
@@ -2509,7 +2494,6 @@ HTML_TEMPLATE = """
             if (drug.rxcui && selectedPrescriptions.some(item => item.rxcui === drug.rxcui)) {
                 return;
             }
-            drug.formulary_source = selectedFormularySource();
             selectedPrescriptions.push(drug);
             syncPrescriptionSelectionInputs();
         }
@@ -2518,32 +2502,6 @@ HTML_TEMPLATE = """
             return carrierInputs
                 .filter(input => input.checked)
                 .map(input => input.value);
-        }
-
-        function availableFormularySources() {
-            const carriers = selectedCarrierValues();
-            return formularySources.filter(source => carriers.includes(source.carrier));
-        }
-
-        function selectedFormularySource() {
-            const selectedValue = formularySourceSelect.value;
-            return availableFormularySources().find(source => source.value === selectedValue) || null;
-        }
-
-        function updateFormularySourceOptions() {
-            const previousValue = formularySourceSelect.value;
-            const sources = availableFormularySources();
-            if (!sources.length) {
-                formularySourceSelect.innerHTML = '<option value="">Select a carrier to choose a formulary</option>';
-                return;
-            }
-            formularySourceSelect.innerHTML = sources.map(source => {
-                const selected = source.value === previousValue ? ' selected' : '';
-                return `<option value="${escapeHtml(source.value)}"${selected}>${escapeHtml(source.label)}</option>`;
-            }).join('');
-            if (!sources.some(source => source.value === previousValue)) {
-                formularySourceSelect.value = sources[0].value;
-            }
         }
 
         async function searchDrugOptions(query) {
@@ -2559,10 +2517,6 @@ HTML_TEMPLATE = """
                     location: document.getElementById('location').value || 'dallas',
                 });
                 selectedCarrierValues().forEach(carrier => params.append('carriers', carrier));
-                const source = selectedFormularySource();
-                if (source) {
-                    params.set('formulary_source', source.value);
-                }
                 const response = await fetch('/drugs/search?' + params.toString());
                 const data = await response.json();
                 renderDrugSearchResults(data.drugs || [], data.message || '');
@@ -2863,6 +2817,9 @@ HTML_TEMPLATE = """
             const status = info.status || 'no_result';
             if (info.tier_label) {
                 return [info.tier_label, info.restriction_label].filter(Boolean).join(' ');
+            }
+            if (status === 'drug_covered' || status === 'generic_covered') {
+                return 'Tier not returned';
             }
             if (status === 'generic_covered') {
                 return 'generic';
@@ -3794,7 +3751,6 @@ def resolve_selected_prescription(selection):
         "selected_is_combination": drug_is_combination_match(display_name, selected),
         "drug_match_warning": "",
         "selected_from_picker": True,
-        "formulary_source": selection.get("formulary_source") or {},
     }
 
 
@@ -4063,6 +4019,127 @@ def coverage_row_restrictions(row):
         if any(truthy_coverage_value(row.get(key)) for key in keys):
             labels.append(label)
     return labels
+
+
+def carrier_source_name(carrier):
+    if carrier == "BCBSTX":
+        return "BCBS"
+    return carrier
+
+
+def formulary_sources_for_network(network):
+    source_carrier = carrier_source_name(network.get("carrier", ""))
+    for group in CARRIER_SOURCE_GROUPS:
+        if group["carrier"] != source_carrier:
+            continue
+        return [
+            source for source in group.get("sources", [])
+            if source.get("kind") == FORMULARY
+            and source.get("validation") == HTTP_200_PDF
+        ]
+    return []
+
+
+@lru_cache(maxsize=16)
+def formulary_pdf_text(url):
+    if PdfReader is None:
+        return ""
+    response = requests.get(url, timeout=NETWORK_LOOKUP_TIMEOUT)
+    response.raise_for_status()
+    reader = PdfReader(BytesIO(response.content))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def formulary_lookup_terms(prescription):
+    terms = []
+    for drug in prescription.get("drug_results", []):
+        for value in (drug.get("name"), drug.get("full_name")):
+            if value and value not in terms:
+                terms.append(value)
+    for value in (
+        prescription.get("drug_name"),
+        prescription.get("prescription"),
+    ):
+        if value and value not in terms:
+            terms.append(value)
+    return terms
+
+
+def formulary_line_tier(line):
+    text = re.sub(r"\d+\.\d+", " ", line)
+    matches = re.findall(r"(?<![\w.-])([1-6])(?![\w.-])", text)
+    return matches[-1] if matches else ""
+
+
+def formulary_line_requirements(line):
+    requirements = []
+    for label in ("PA", "ST", "QL", "AC"):
+        if re.search(rf"\b{label}\b", line, re.IGNORECASE):
+            requirements.append(label)
+    return " ".join(requirements)
+
+
+def search_formulary_text_for_tier(text, terms):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    normalized_terms = [normalize_search_text(term) for term in terms if term]
+    for index, line in enumerate(lines):
+        normalized_line = normalize_search_text(line)
+        if not any(term and term in normalized_line for term in normalized_terms):
+            continue
+        window = " ".join(lines[index:index + 5])
+        tier = formulary_line_tier(window)
+        if tier:
+            return {
+                "tier_label": f"Tier {tier}",
+                "tier_detail": f"Drug Tier: {tier}",
+                "restriction_label": formulary_line_requirements(window),
+            }
+    return {}
+
+
+def lookup_formulary_tier(prescription, network):
+    terms = formulary_lookup_terms(prescription)
+    if not terms:
+        return {}
+    for source in formulary_sources_for_network(network):
+        try:
+            text = formulary_pdf_text(source["url"])
+        except (requests.RequestException, ValueError):
+            continue
+        match = search_formulary_text_for_tier(text, terms)
+        if match:
+            match["formulary_name"] = source["name"]
+            return match
+    return {}
+
+
+def enrich_status_with_formulary_tier(status, prescription, network):
+    if status.get("tier_label"):
+        return status
+    if status.get("status") not in {
+        "drug_covered",
+        "generic_covered",
+        "partial_coverage",
+        "review_exact_drug",
+        "other_form_covered",
+        "related_product_covered",
+    }:
+        return status
+    formulary_tier = lookup_formulary_tier(prescription, network)
+    if not formulary_tier:
+        return status
+    enriched = dict(status)
+    enriched.update({
+        "source": f"{status.get('source', 'CMS Marketplace API')} + Carrier formulary",
+        "tier_label": formulary_tier["tier_label"],
+        "tier_detail": formulary_tier["tier_detail"],
+        "restriction_label": formulary_tier.get("restriction_label", ""),
+        "detail": (
+            status.get("detail", "") +
+            f" Carrier formulary {formulary_tier.get('formulary_name', '')} shows {formulary_tier['tier_detail']}."
+        ).strip(),
+    })
+    return enriched
 
 
 def summarize_tiers(coverage_rows):
@@ -4395,8 +4472,11 @@ def check_prescription_statuses(prescription, networks, place):
     statuses = {}
     for network in networks:
         if network.get("marketplace_issuer"):
-            statuses[network["id"]] = check_marketplace_drug_status(
+            status = check_marketplace_drug_status(
                 prescription, network, place
+            )
+            statuses[network["id"]] = enrich_status_with_formulary_tier(
+                status, prescription, network
             )
         else:
             statuses[network["id"]] = make_network_status(
@@ -4450,6 +4530,11 @@ def checked_formulary_matches(drug, networks, place):
         if not coverage_rows:
             continue
         tier_label, tier_detail, restriction_label = summarize_tiers(coverage_rows)
+        if not tier_label:
+            tier_match = lookup_formulary_tier({"drug_results": [drug]}, network)
+            tier_label = tier_match.get("tier_label", "")
+            tier_detail = tier_match.get("tier_detail", "")
+            restriction_label = tier_match.get("restriction_label", "")
         matches.append({
             "carrier": network["carrier"],
             "plan": network["name"],

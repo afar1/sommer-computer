@@ -719,6 +719,54 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(response.json["drugs"], [])
         self.assertFalse(mock_plan_ids.called)
 
+    def test_formulary_pdf_text_lookup_reads_drug_tier_column(self):
+        text = """
+        ANTIHYPERLIPIDEMICS
+        atorvastatin calcium tab 10 mg (base equivalent), 20 mg (base
+        equivalent), 40 mg (base equivalent), 80 mg (base equivalent)
+        (Lipitor)
+        1 AC
+        cholestyramine powder 4 gm/dose 1
+        """
+        match = web_app.search_formulary_text_for_tier(text, ["Atorvastatin"])
+
+        self.assertEqual(match["tier_label"], "Tier 1")
+        self.assertEqual(match["tier_detail"], "Drug Tier: 1")
+        self.assertEqual(match["restriction_label"], "AC")
+
+    def test_prescription_status_enriches_missing_tier_from_carrier_formulary(self):
+        prescription = {
+            "prescription": "Atorvastatin 80 mg Oral Tablet",
+            "drug_found": True,
+            "rxcui": "259255",
+            "drug_name": "Atorvastatin 80 mg Oral Pill",
+            "drug_results": [{"name": "Atorvastatin"}],
+        }
+        network = {
+            "id": "bcbstx:blue_advantage_hmo",
+            "carrier": "BCBSTX",
+            "name": "Blue Advantage HMO",
+        }
+        status = {
+            "status": "drug_covered",
+            "source": "CMS Marketplace API",
+            "detail": "CMS shows coverage.",
+        }
+
+        with patch.object(
+            web_app,
+            "formulary_pdf_text",
+            return_value="atorvastatin calcium tab 10 mg, 20 mg, 40 mg, 80 mg (Lipitor) 1 AC",
+        ):
+            enriched = web_app.enrich_status_with_formulary_tier(
+                status, prescription, network
+            )
+
+        self.assertEqual(enriched["tier_label"], "Tier 1")
+        self.assertEqual(enriched["tier_detail"], "Drug Tier: 1")
+        self.assertEqual(enriched["restriction_label"], "AC")
+        self.assertIn("Carrier formulary", enriched["source"])
+
     def test_route_uses_exact_prescription_selection_rxcui(self):
         selection = [{
             "rxcui": "259255",
@@ -1043,32 +1091,6 @@ class LookupTests(unittest.TestCase):
             "drug_covered",
         )
 
-    def test_route_preserves_selected_prescription_formulary_source(self):
-        selection = [{
-            "rxcui": "197805",
-            "display_name": "Ibuprofen 400 mg Oral Pill",
-            "name": "Ibuprofen",
-            "formulary_source": {
-                "value": "bcbstx:4-tier",
-                "label": "Blue Cross and Blue Shield of Texas · 4-Tier",
-            },
-        }]
-
-        with patch.object(web_app, "search_npi", return_value=[]), \
-             patch.object(web_app, "check_prescription_statuses", return_value={}):
-            client = web_app.app.test_client()
-            response = client.get(
-                "/search?prescription_selections=" + quote(json.dumps(selection))
-            )
-
-        self.assertEqual(response.status_code, 200)
-        prescription = response.json["prescriptions"][0]
-        self.assertEqual(prescription["rxcui"], "197805")
-        self.assertEqual(
-            prescription["formulary_source"]["label"],
-            "Blue Cross and Blue Shield of Texas · 4-Tier",
-        )
-
     def test_home_page_has_network_status_matrix_markup(self):
         client = web_app.app.test_client()
         response = client.get("/")
@@ -1096,12 +1118,6 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Blue Cross and Blue Shield of Texas", html)
         self.assertIn("UnitedHealthcare", html)
         self.assertIn("Oscar", html)
-        self.assertIn("Formulary source", html)
-        self.assertIn("Blue Cross and Blue Shield of Texas · 4-Tier", html)
-        self.assertIn("Blue Cross and Blue Shield of Texas · 6-Tier", html)
-        self.assertIn("UnitedHealthcare · Individual Exchange HMO", html)
-        self.assertIn("Oscar · 4-Tier", html)
-        self.assertIn("Oscar · 6-Tier", html)
         self.assertIn('name="carrier_filter_submitted"', html)
         self.assertIn('name="carriers"', html)
         self.assertIn('id="doctors"', html)
@@ -1128,6 +1144,7 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Suspect", html)
         self.assertIn("Selected RxCUI not covered; exact drug may differ", html)
         self.assertIn("info.tier_label", html)
+        self.assertIn("Tier not returned", html)
         self.assertIn("Coverage found; confirm exact NPI/location", html)
         self.assertIn("Coverage evidence found; confirm exact drug/form", html)
         self.assertIn("Only some matched plan IDs covered", html)
