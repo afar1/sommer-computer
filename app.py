@@ -364,6 +364,31 @@ CARRIER_SOURCE_GROUPS = [
     },
 ]
 
+KNOWN_FACILITY_DIRECTORY_CANDIDATES = [
+    {
+        "display_name": "Baylor St. Luke's Medical Center",
+        "name": "Baylor St. Luke's Medical Center",
+        "aliases": [
+            "st luke",
+            "st lukes",
+            "st. luke",
+            "st. lukes",
+            "saint luke",
+            "saint lukes",
+            "baylor st luke",
+            "baylor st lukes",
+            "baylor st. luke",
+            "baylor st. lukes",
+        ],
+        "specialty": "Carrier directory candidate",
+        "address": "6700 Bertner Avenue, Houston, TX 77030",
+        "location": "HOUSTON, TX 77030",
+        "city": "Houston",
+        "source": "Carrier directory",
+        "source_detail": "Appears in carrier provider directories; NPI identity still needs confirmation.",
+    },
+]
+
 
 def utc_now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -2472,7 +2497,7 @@ HTML_TEMPLATE = """
         function syncFacilitySelectionInputs() {
             facilityInput.value = selectedFacilities.map(providerDisplayName).join(', ');
             facilitySelectionsInput.value = JSON.stringify(
-                selectedFacilities.filter(item => item.npi)
+                selectedFacilities.filter(item => item.npi || item.selection_type === 'directory')
             );
             renderSelectedFacilities();
         }
@@ -3722,6 +3747,7 @@ def unique_search_queries(queries):
 def facility_search_queries(name):
     normalized = normalize_search_text(name)
     corrected = normalized.replace("bailer", "baylor")
+    punctuationless = corrected.replace(".", "").replace("'", "")
     queries = [name]
     if corrected != normalized:
         queries.append(corrected)
@@ -3731,6 +3757,11 @@ def facility_search_queries(name):
             "Baylor Scott and White",
             "Baylor University Medical Center",
         ])
+    if "st luke" in punctuationless or "saint luke" in punctuationless:
+        queries.extend([
+            "Baylor St. Luke's Medical Center",
+            "St. Luke's Health",
+        ])
     return unique_search_queries(queries)
 
 
@@ -3738,6 +3769,36 @@ def provider_search_queries(name, provider_type):
     if provider_type == "facility":
         return facility_search_queries(name)
     return unique_search_queries([name])
+
+
+def known_facility_directory_candidates(query, city=None):
+    query_text = normalize_search_text(query).replace(".", "").replace("'", "")
+    city_text = normalize_search_text(city or "")
+    candidates = []
+    for candidate in KNOWN_FACILITY_DIRECTORY_CANDIDATES:
+        candidate_city = normalize_search_text(candidate.get("city", ""))
+        if city_text and candidate_city and city_text != candidate_city:
+            continue
+        searchable_names = [
+            candidate.get("display_name", ""),
+            candidate.get("name", ""),
+            *candidate.get("aliases", []),
+        ]
+        for name in searchable_names:
+            name_text = normalize_search_text(name).replace(".", "").replace("'", "")
+            if query_text in name_text or name_text in query_text:
+                candidates.append(candidate)
+                break
+    return candidates
+
+
+def carrier_search_name(requested_name, provider_type, npi_results):
+    if provider_type == "facility":
+        for result in npi_results:
+            resolved_name = str(result.get("name", "")).strip()
+            if result.get("npi") and resolved_name:
+                return resolved_name
+    return requested_name
 
 
 def search_provider_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="doctor"):
@@ -3771,6 +3832,23 @@ def serialize_provider_candidate(provider, provider_type):
         "location": provider.get("location", ""),
         "phone": provider.get("phone", ""),
         "provider_type": provider_type,
+    }
+
+
+def serialize_directory_facility_candidate(provider):
+    return {
+        "npi": "",
+        "name": provider.get("name", ""),
+        "display_name": provider.get("display_name") or provider.get("name", ""),
+        "credential": "",
+        "specialty": provider.get("specialty", ""),
+        "address": provider.get("address", ""),
+        "location": provider.get("location", ""),
+        "phone": "",
+        "provider_type": "facility",
+        "source": provider.get("source", "Carrier directory"),
+        "source_detail": provider.get("source_detail", ""),
+        "selection_type": "directory",
     }
 
 
@@ -4955,7 +5033,12 @@ def parse_provider_selections(selection_input):
         return []
     return [
         selection for selection in selections
-        if isinstance(selection, dict) and selection.get("npi")
+        if isinstance(selection, dict)
+        and (
+            selection.get("npi")
+            or selection.get("selection_type") == "directory"
+            or selection.get("source") == "Carrier directory"
+        )
     ]
 
 
@@ -5063,6 +5146,16 @@ def providers_search():
             query, state="TX", city=city, limit=25, provider_type=provider_type
         )
     ]
+    if provider_type == "facility":
+        seen_names = {
+            normalize_search_text(provider.get("display_name") or provider.get("name") or "")
+            for provider in providers
+        }
+        for candidate in known_facility_directory_candidates(query, city=city):
+            candidate_name = normalize_search_text(candidate.get("display_name") or candidate.get("name") or "")
+            if candidate_name not in seen_names:
+                providers.append(serialize_directory_facility_candidate(candidate))
+                seen_names.add(candidate_name)
     return jsonify({"providers": providers})
 
 
@@ -5091,19 +5184,23 @@ def search():
         for selection in facility_selections
     }
     for selection in facility_selections:
-        doctors.append({
-            "name": selection.get("display_name") or selection.get("name"),
-            "specialty": None,
-            "provider_type": "facility",
-            "npi_results": [{
-                "npi": selection.get("npi", ""),
+        npi = str(selection.get("npi", "")).strip()
+        npi_results = []
+        if npi:
+            npi_results.append({
+                "npi": npi,
                 "name": selection.get("name", ""),
                 "credential": selection.get("credential", ""),
                 "specialty": selection.get("specialty", ""),
                 "address": selection.get("address", ""),
                 "location": selection.get("location", ""),
                 "phone": selection.get("phone", ""),
-            }],
+            })
+        doctors.append({
+            "name": selection.get("display_name") or selection.get("name"),
+            "specialty": None,
+            "provider_type": "facility",
+            "npi_results": npi_results,
         })
     for facility in parse_doctors(facilities_input, provider_type="facility"):
         if facility["name"] in selected_facility_names:
@@ -5127,7 +5224,8 @@ def search():
                 provider_type=doctor["provider_type"]
             )
 
-        bcbstx_urls = generate_bcbstx_urls(doctor["name"], lat, lon, radius) if "bcbstx" in selected_carriers else {}
+        carrier_query_name = carrier_search_name(doctor["name"], resolved_provider_type, npi_results)
+        bcbstx_urls = generate_bcbstx_urls(carrier_query_name, lat, lon, radius) if "bcbstx" in selected_carriers else {}
         uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
         networks = build_networks(bcbstx_urls, uhc_urls)
         network_statuses = check_network_statuses(

@@ -155,12 +155,80 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(provider["npi_count"], 1)
         self.assertEqual(provider["npi_results"][0]["npi"], "9876543210")
 
+    def test_selected_facility_uses_resolved_name_for_bcbstx_links(self):
+        selection = [{
+            "npi": "9876543210",
+            "name": "HOUSTON METHODIST",
+            "display_name": "Houston Methodist Hospital",
+            "specialty": "General Acute Care Hospital",
+            "address": "6565 Fannin St, Houston, TX 77030",
+            "location": "HOUSTON, TX 77030",
+            "provider_type": "facility",
+        }]
+
+        with patch.object(web_app, "search_npi", return_value=[]), \
+             patch.object(web_app, "check_network_statuses", return_value={}):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?facilities=Houston+Methodist+Hospital&location=houston"
+                "&facility_selections=" + quote(json.dumps(selection))
+            )
+
+        self.assertEqual(response.status_code, 200)
+        urls = response.json["providers"][0]["bcbstx_urls"]
+        self.assertIn("HOUSTON%20METHODIST", urls["blue_advantage_hmo"]["url"])
+        self.assertNotIn("Houston%20Methodist%20Hospital", urls["blue_advantage_hmo"]["url"])
+
+    def test_unresolved_facility_selection_does_not_count_as_npi_found(self):
+        selection = [{
+            "name": "Baylor St. Luke's Medical Center",
+            "display_name": "Baylor St. Luke's Medical Center",
+            "specialty": "Carrier directory candidate",
+            "address": "6700 Bertner Avenue, Houston, TX 77030",
+            "location": "HOUSTON, TX 77030",
+            "provider_type": "facility",
+            "source": "Carrier directory",
+        }]
+
+        with patch.object(web_app, "search_npi", return_value=[]):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?location=houston"
+                "&facility_selections=" + quote(json.dumps(selection))
+            )
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["provider_type"], "not_found")
+        self.assertFalse(provider["npi_found"])
+        self.assertEqual(provider["npi_count"], 0)
+        self.assertEqual(provider["npi_results"], [])
+        self.assertIn("Baylor%20St", provider["bcbstx_urls"]["blue_advantage_hmo"]["url"])
+
     def test_facility_search_queries_include_baylor_scott_white_aliases(self):
         queries = web_app.facility_search_queries("bailer scott and white")
 
         self.assertIn("baylor scott and white", queries)
         self.assertIn("Baylor Scott White", queries)
         self.assertIn("Baylor University Medical Center", queries)
+
+    def test_facility_search_queries_include_st_luke_aliases(self):
+        queries = web_app.facility_search_queries("St. Luke")
+
+        self.assertIn("Baylor St. Luke's Medical Center", queries)
+        self.assertIn("St. Luke's Health", queries)
+
+    def test_provider_search_route_returns_directory_facility_candidates(self):
+        with patch.object(web_app, "search_npi", return_value=[]):
+            client = web_app.app.test_client()
+            response = client.get("/providers/search?q=St.+Luke&type=facility&city=Houston")
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["display_name"], "Baylor St. Luke's Medical Center")
+        self.assertEqual(provider["provider_type"], "facility")
+        self.assertEqual(provider["source"], "Carrier directory")
+        self.assertEqual(provider["npi"], "")
 
     def test_auto_prefers_facility_for_facility_like_query_even_with_doctor_match(self):
         def fake_search(name, **kwargs):
