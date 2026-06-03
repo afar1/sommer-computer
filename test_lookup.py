@@ -188,6 +188,11 @@ class LookupTests(unittest.TestCase):
             "location": "HOUSTON, TX 77030",
             "provider_type": "facility",
             "source": "Carrier directory",
+            "source_detail": "Appears in carrier provider directories; NPI identity still needs confirmation.",
+            "confirmed_network_ids": [
+                "bcbstx:blue_advantage_hmo",
+                "bcbstx:my_blue_health",
+            ],
         }]
 
         with patch.object(web_app, "search_npi", return_value=[]):
@@ -203,6 +208,20 @@ class LookupTests(unittest.TestCase):
         self.assertFalse(provider["npi_found"])
         self.assertEqual(provider["npi_count"], 0)
         self.assertEqual(provider["npi_results"], [])
+        self.assertEqual(provider["source"], "Carrier directory")
+        self.assertIn("NPI identity still needs confirmation", provider["source_detail"])
+        self.assertEqual(provider["confirmed_network_ids"], [
+            "bcbstx:blue_advantage_hmo",
+            "bcbstx:my_blue_health",
+        ])
+        self.assertEqual(
+            provider["network_statuses"]["bcbstx:blue_advantage_hmo"]["status"],
+            "in",
+        )
+        self.assertEqual(
+            provider["network_statuses"]["bcbstx:my_blue_health"]["source"],
+            "BCBS carrier directory",
+        )
         self.assertIn("Baylor%20St", provider["bcbstx_urls"]["blue_advantage_hmo"]["url"])
 
     def test_facility_search_queries_include_baylor_scott_white_aliases(self):
@@ -228,6 +247,7 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(provider["display_name"], "Baylor St. Luke's Medical Center")
         self.assertEqual(provider["provider_type"], "facility")
         self.assertEqual(provider["source"], "Carrier directory")
+        self.assertIn("bcbstx:blue_advantage_hmo", provider["confirmed_network_ids"])
         self.assertEqual(provider["npi"], "")
 
     def test_auto_prefers_facility_for_facility_like_query_even_with_doctor_match(self):
@@ -349,6 +369,14 @@ class LookupTests(unittest.TestCase):
         self.assertEqual([provider["npi_results"][0]["npi"] for provider in providers], [
             "1111111111",
             "2222222222",
+        ])
+        self.assertEqual([provider["npi_results"][0]["specialty"] for provider in providers], [
+            "Internal Medicine",
+            "Family Medicine",
+        ])
+        self.assertEqual([provider["npi_results"][0]["location"] for provider in providers], [
+            "DALLAS, TX 75201",
+            "DALLAS, TX 75201",
         ])
         self.assertEqual(checked_npis, [
             ("Alexandra McWilliams", ["1111111111"]),
@@ -1275,6 +1303,8 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Run check", html)
         self.assertIn("Coverage by individual NPI match against carrier rosters", html)
         self.assertIn("Coverage by organization NPI match against carrier rosters", html)
+        self.assertIn("primaryMatch.specialty", html)
+        self.assertIn("primaryMatch.location", html)
         self.assertIn("Doctors", html)
         self.assertIn("Facilities", html)
         self.assertIn("Prescriptions", html)
@@ -1362,6 +1392,8 @@ class LookupTests(unittest.TestCase):
         self.assertIn("data-hide-column", html)
         self.assertIn("Hide row", html)
         self.assertIn("Hide column", html)
+        self.assertIn("Carrier directory candidate", html)
+        self.assertIn("NPI identity still needs confirmation", html)
         self.assertNotIn(">Item</th>", html)
         self.assertNotIn("status-toggle", html)
         self.assertNotIn("providerNetworkStatuses", html)

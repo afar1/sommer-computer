@@ -386,6 +386,10 @@ KNOWN_FACILITY_DIRECTORY_CANDIDATES = [
         "city": "Houston",
         "source": "Carrier directory",
         "source_detail": "Appears in carrier provider directories; NPI identity still needs confirmation.",
+        "confirmed_network_ids": [
+            "bcbstx:blue_advantage_hmo",
+            "bcbstx:my_blue_health",
+        ],
     },
 ]
 
@@ -3339,11 +3343,14 @@ HTML_TEMPLATE = """
 
         function providerMatchSummary(result) {
             const label = result.npi_found ? `${result.npi_count} NPI match${result.npi_count === 1 ? '' : 'es'}` : 'No NPI match';
+            const primaryMatch = (result.npi_results || [])[0] || {};
+            const matchContext = [primaryMatch.specialty, primaryMatch.location].filter(Boolean).join(' · ');
+            const lines = matchContext ? [matchContext, label] : [label];
             const requested = result.requested_provider || '';
             if (requested && requested !== result.provider) {
-                return `${escapeHtml(label)}<br>${escapeHtml('Matched from: ' + requested)}`;
+                lines.push('Matched from: ' + requested);
             }
-            return escapeHtml(label);
+            return lines.map(escapeHtml).join('<br>');
         }
 
         function drugMatchName(drug) {
@@ -3676,6 +3683,9 @@ HTML_TEMPLATE = """
                 }
                 if (result.npi_found) {
                     html += `<span class="badge badge-success">${result.npi_count} found</span>`;
+                } else if (result.source === 'Carrier directory') {
+                    html += '<span class="badge badge-success">Carrier directory</span>';
+                    html += '<span class="badge badge-error">NPI unresolved</span>';
                 } else {
                     html += '<span class="badge badge-error">Not found</span>';
                 }
@@ -3691,6 +3701,12 @@ HTML_TEMPLATE = """
                         html += `<div class="npi-detail">${npi.location}${npi.phone ? ' | ' + npi.phone : ''}</div>`;
                         html += '</div>';
                     }
+                } else if (result.source === 'Carrier directory') {
+                    html += '<div class="npi-item">';
+                    html += '<div class="npi-name">Carrier directory candidate</div>';
+                    html += `<div class="npi-detail">${escapeHtml(result.address || result.location || '')}</div>`;
+                    html += `<div class="npi-detail">${escapeHtml(result.source_detail || 'NPI identity still needs confirmation before CMS coverage can be trusted.')}</div>`;
+                    html += '</div>';
                 } else {
                     html += '<div class="npi-item not-found">';
                     html += '<div class="npi-name">No matches in NPI Registry</div>';
@@ -3933,6 +3949,7 @@ def serialize_directory_facility_candidate(provider):
         "source": provider.get("source", "Carrier directory"),
         "source_detail": provider.get("source_detail", ""),
         "selection_type": "directory",
+        "confirmed_network_ids": provider.get("confirmed_network_ids", []),
     }
 
 
@@ -4953,6 +4970,21 @@ def check_network_statuses(provider_name, provider_type, npi_results, networks, 
     return statuses
 
 
+def apply_confirmed_carrier_network_statuses(statuses, provider_name, networks, confirmed_network_ids):
+    confirmed_ids = set(confirmed_network_ids or [])
+    if not confirmed_ids:
+        return statuses
+    for network in networks:
+        if network["id"] not in confirmed_ids:
+            continue
+        statuses[network["id"]] = make_network_status(
+            "in",
+            "BCBS carrier directory",
+            f"Carrier directory confirmation shows {provider_name} in network for {network['name']}. NPI identity is unresolved, so CMS coverage was not used for this row.",
+        )
+    return statuses
+
+
 def check_prescription_statuses(prescription, networks, place):
     statuses = {}
     for network in networks:
@@ -5295,6 +5327,12 @@ def search():
             "specialty": None,
             "provider_type": "facility",
             "npi_results": npi_results,
+            "address": selection.get("address", ""),
+            "location": selection.get("location", ""),
+            "source": selection.get("source", ""),
+            "source_detail": selection.get("source_detail", ""),
+            "selection_type": selection.get("selection_type", ""),
+            "confirmed_network_ids": selection.get("confirmed_network_ids", []),
         })
     for facility in parse_doctors(facilities_input, provider_type="facility"):
         if facility["name"] in selected_facility_names:
@@ -5326,6 +5364,9 @@ def search():
             network_statuses = check_network_statuses(
                 provider_name, resolved_provider_type, provider_npi_results, networks, marketplace_place
             )
+            network_statuses = apply_confirmed_carrier_network_statuses(
+                network_statuses, provider_name, networks, doctor.get("confirmed_network_ids", [])
+            )
 
             results.append({
                 "provider": provider_name,
@@ -5335,6 +5376,12 @@ def search():
                 "requested_provider_type": doctor["provider_type"],
                 "provider_group": provider_result_group(doctor["provider_type"], resolved_provider_type),
                 "specialty_filter": doctor["specialty"],
+                "address": doctor.get("address", ""),
+                "location": doctor.get("location", ""),
+                "source": doctor.get("source", ""),
+                "source_detail": doctor.get("source_detail", ""),
+                "selection_type": doctor.get("selection_type", ""),
+                "confirmed_network_ids": doctor.get("confirmed_network_ids", []),
                 "npi_found": len(provider_npi_results) > 0,
                 "npi_count": len(provider_npi_results),
                 "npi_results": provider_npi_results[:5],
