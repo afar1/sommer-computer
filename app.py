@@ -1314,6 +1314,39 @@ HTML_TEMPLATE = """
         .network-matrix td.network-cell:hover {
             background: #fbfcfd;
         }
+        .network-matrix .matrix-hidden {
+            display: none;
+        }
+        .matrix-hide-button {
+            align-items: center;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            color: #94a3b8;
+            cursor: pointer;
+            display: inline-flex;
+            flex: 0 0 auto;
+            font-size: 14px;
+            font-weight: 800;
+            height: 22px;
+            justify-content: center;
+            line-height: 1;
+            padding: 0;
+            width: 22px;
+        }
+        .matrix-hide-button:hover,
+        .matrix-hide-button:focus-visible {
+            background: #e5edf5;
+            border-color: #cbd5e1;
+            color: #334155;
+            outline: none;
+        }
+        .carrier-header-top {
+            align-items: flex-start;
+            display: flex;
+            gap: 6px;
+            justify-content: space-between;
+        }
         .lookup-section-row td {
             background: #f3f6f8;
             padding: 10px 20px;
@@ -2268,9 +2301,13 @@ HTML_TEMPLATE = """
         let drugSearchRequest = null;
         let drugSearchSequence = 0;
         let activeStatusPopover = null;
+        const hiddenMatrixRows = new Set();
+        const hiddenMatrixColumns = new Set();
 
         searchForm.addEventListener('submit', async function(e) {
             e.preventDefault();
+            hiddenMatrixRows.clear();
+            hiddenMatrixColumns.clear();
 
             const btn = document.getElementById('searchBtn');
 
@@ -2314,6 +2351,16 @@ HTML_TEMPLATE = """
 
         resultsDiv.addEventListener('pointerleave', clearColumnHover);
         resultsDiv.addEventListener('click', function(e) {
+            const hideRowButton = e.target.closest('[data-hide-row]');
+            if (hideRowButton && resultsDiv.contains(hideRowButton)) {
+                hideMatrixRow(hideRowButton.dataset.hideRow);
+                return;
+            }
+            const hideColumnButton = e.target.closest('[data-hide-column]');
+            if (hideColumnButton && resultsDiv.contains(hideColumnButton)) {
+                hideMatrixColumn(hideColumnButton.dataset.hideColumn);
+                return;
+            }
             const cell = e.target.closest('.network-cell[data-status-detail]');
             if (!cell || !resultsDiv.contains(cell)) {
                 return;
@@ -3292,6 +3339,10 @@ HTML_TEMPLATE = """
 
         function providerMatchSummary(result) {
             const label = result.npi_found ? `${result.npi_count} NPI match${result.npi_count === 1 ? '' : 'es'}` : 'No NPI match';
+            const requested = result.requested_provider || '';
+            if (requested && requested !== result.provider) {
+                return `${escapeHtml(label)}<br>${escapeHtml('Matched from: ' + requested)}`;
+            }
             return escapeHtml(label);
         }
 
@@ -3372,8 +3423,8 @@ HTML_TEMPLATE = """
                     networks.length + 2,
                     doctorResults.length
                 );
-                for (const result of doctorResults) {
-                    html += renderProviderLookupRow(result, networks);
+                for (const [index, result] of doctorResults.entries()) {
+                    html += renderProviderLookupRow(result, networks, itemRowId('doctor', index));
                 }
             }
 
@@ -3384,8 +3435,8 @@ HTML_TEMPLATE = """
                     networks.length + 2,
                     facilityResults.length
                 );
-                for (const result of facilityResults) {
-                    html += renderProviderLookupRow(result, networks);
+                for (const [index, result] of facilityResults.entries()) {
+                    html += renderProviderLookupRow(result, networks, itemRowId('facility', index));
                 }
             }
 
@@ -3396,8 +3447,8 @@ HTML_TEMPLATE = """
                     networks.length + 2,
                     prescriptionResults.length
                 );
-                for (const result of prescriptionResults) {
-                    html += renderPrescriptionLookupRow(result, networks);
+                for (const [index, result] of prescriptionResults.entries()) {
+                    html += renderPrescriptionLookupRow(result, networks, itemRowId('rx', index));
                 }
             }
 
@@ -3407,11 +3458,18 @@ HTML_TEMPLATE = """
             return html;
         }
 
+        function itemRowId(type, index) {
+            return `${type}-${index}`;
+        }
+
         function renderCarrierHeader(network, summary, columnIndex) {
             const issuer = network.carrier || network.marketplace_issuer || '';
             const planType = network.name.includes('HMO') ? 'HMO' : network.name.includes('EPO') || network.name.includes('My Blue') ? 'EPO' : 'Exchange';
             let html = `<th class="carrier-header" data-column-index="${columnIndex}">`;
+            html += '<div class="carrier-header-top">';
             html += `<div class="carrier-name">${escapeHtml(network.name)}</div>`;
+            html += `<button type="button" class="matrix-hide-button" data-hide-column="${columnIndex}" aria-label="Hide column" title="Hide column">&times;</button>`;
+            html += '</div>';
             html += `<div class="carrier-meta">${escapeHtml(issuer)} · ${escapeHtml(planType)}</div>`;
             if (!summary.considered) {
                 html += '<div class="carrier-counts">not offered</div>';
@@ -3451,14 +3509,15 @@ HTML_TEMPLATE = """
             return html;
         }
 
-        function renderProviderLookupRow(result, networks) {
-            let html = '<tr class="lookup-row">';
+        function renderProviderLookupRow(result, networks, rowId) {
+            let html = `<tr class="lookup-row" data-row-id="${escapeHtml(rowId)}">`;
             html += '<td class="lookup-item-cell" data-column-index="0">';
             html += '<div class="lookup-item-content">';
             html += renderInfoTip('NPI match details', providerMatchTooltip(result), 'item-info');
             html += '<div class="lookup-item-heading-row">';
             html += `<div class="lookup-item-heading">${escapeHtml(result.provider)}</div>`;
             html += `<span class="provider-tag item-tag ${providerTagClass(result.provider_type)}">${formatProviderType(result.provider_type)}</span>`;
+            html += `<button type="button" class="matrix-hide-button" data-hide-row="${escapeHtml(rowId)}" aria-label="Hide row" title="Hide row">&times;</button>`;
             html += '</div>';
             html += `<div class="lookup-item-meta">${providerMatchSummary(result)}</div>`;
             html += '</div>';
@@ -3469,8 +3528,8 @@ HTML_TEMPLATE = """
             return html;
         }
 
-        function renderPrescriptionLookupRow(result, networks) {
-            let html = '<tr class="lookup-row">';
+        function renderPrescriptionLookupRow(result, networks, rowId) {
+            let html = `<tr class="lookup-row" data-row-id="${escapeHtml(rowId)}">`;
             const tagClass = result.drug_found ? 'rx' : 'not-found';
             const tagLabel = result.drug_found ? 'Rx' : 'Not found';
             html += '<td class="lookup-item-cell" data-column-index="0">';
@@ -3479,6 +3538,7 @@ HTML_TEMPLATE = """
             html += '<div class="lookup-item-heading-row">';
             html += `<div class="lookup-item-heading">${escapeHtml(result.prescription)}</div>`;
             html += `<span class="provider-tag item-tag ${tagClass}">${tagLabel}</span>`;
+            html += `<button type="button" class="matrix-hide-button" data-hide-row="${escapeHtml(rowId)}" aria-label="Hide row" title="Hide row">&times;</button>`;
             html += '</div>';
             html += `<div class="lookup-item-meta">${prescriptionMatchSummary(result)}</div>`;
             html += '</div>';
@@ -3660,6 +3720,30 @@ HTML_TEMPLATE = """
 
             html += '</div></details>';
             return html;
+        }
+
+        function hideMatrixRow(rowId) {
+            if (!rowId) {
+                return;
+            }
+            hiddenMatrixRows.add(rowId);
+            const row = resultsDiv.querySelector(`[data-row-id="${CSS.escape(rowId)}"]`);
+            if (row) {
+                row.classList.add('matrix-hidden');
+            }
+            closeStatusPopover();
+        }
+
+        function hideMatrixColumn(columnIndex) {
+            if (!columnIndex) {
+                return;
+            }
+            hiddenMatrixColumns.add(columnIndex);
+            for (const cell of resultsDiv.querySelectorAll(`[data-column-index="${CSS.escape(columnIndex)}"]`)) {
+                cell.classList.add('matrix-hidden');
+            }
+            clearColumnHover();
+            closeStatusPopover();
         }
 
         function renderCarrierSourceDetails(sourceGroups) {
@@ -5069,6 +5153,16 @@ def selected_carriers_from_values(values):
     return selected or set(DEFAULT_CARRIERS)
 
 
+def provider_result_matches(provider_name, npi_results):
+    if len(npi_results) <= 1:
+        return [(provider_name, npi_results)]
+    matches = []
+    for npi_result in npi_results:
+        match_name = npi_result.get("name") or provider_name
+        matches.append((match_name, [npi_result]))
+    return matches
+
+
 def carrier_source_groups_for_selection(selected_carriers):
     allowed_source_carriers = {
         SOURCE_CARRIERS_BY_VALUE[carrier]
@@ -5215,38 +5309,40 @@ def search():
 
     results = []
     for doctor in doctors:
-        if doctor.get("npi_results"):
+        if "npi_results" in doctor:
             npi_results = doctor["npi_results"]
-            resolved_provider_type = doctor["provider_type"]
+            resolved_provider_type = doctor["provider_type"] if npi_results else "not_found"
         else:
             npi_results, resolved_provider_type = resolve_provider_npi(
                 doctor["name"], state="TX", city=city, specialty=doctor["specialty"],
                 provider_type=doctor["provider_type"]
             )
 
-        carrier_query_name = carrier_search_name(doctor["name"], resolved_provider_type, npi_results)
-        bcbstx_urls = generate_bcbstx_urls(carrier_query_name, lat, lon, radius) if "bcbstx" in selected_carriers else {}
-        uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
-        networks = build_networks(bcbstx_urls, uhc_urls)
-        network_statuses = check_network_statuses(
-            doctor["name"], resolved_provider_type, npi_results, networks, marketplace_place
-        )
+        for provider_name, provider_npi_results in provider_result_matches(doctor["name"], npi_results):
+            carrier_query_name = carrier_search_name(provider_name, resolved_provider_type, provider_npi_results)
+            bcbstx_urls = generate_bcbstx_urls(carrier_query_name, lat, lon, radius) if "bcbstx" in selected_carriers else {}
+            uhc_urls = generate_uhc_urls() if "uhc" in selected_carriers else {}
+            networks = build_networks(bcbstx_urls, uhc_urls)
+            network_statuses = check_network_statuses(
+                provider_name, resolved_provider_type, provider_npi_results, networks, marketplace_place
+            )
 
-        results.append({
-            "provider": doctor["name"],
-            "doctor": doctor["name"],
-            "provider_type": resolved_provider_type,
-            "requested_provider_type": doctor["provider_type"],
-            "provider_group": provider_result_group(doctor["provider_type"], resolved_provider_type),
-            "specialty_filter": doctor["specialty"],
-            "npi_found": len(npi_results) > 0,
-            "npi_count": len(npi_results),
-            "npi_results": npi_results[:5],
-            "bcbstx_urls": bcbstx_urls,
-            "uhc_urls": uhc_urls,
-            "networks": networks,
-            "network_statuses": network_statuses,
-        })
+            results.append({
+                "provider": provider_name,
+                "doctor": provider_name,
+                "requested_provider": doctor["name"],
+                "provider_type": resolved_provider_type,
+                "requested_provider_type": doctor["provider_type"],
+                "provider_group": provider_result_group(doctor["provider_type"], resolved_provider_type),
+                "specialty_filter": doctor["specialty"],
+                "npi_found": len(provider_npi_results) > 0,
+                "npi_count": len(provider_npi_results),
+                "npi_results": provider_npi_results[:5],
+                "bcbstx_urls": bcbstx_urls,
+                "uhc_urls": uhc_urls,
+                "networks": networks,
+                "network_statuses": network_statuses,
+            })
 
     prescription_results = []
     selected_names = {

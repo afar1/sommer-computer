@@ -304,6 +304,57 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["providers"][0]["network_statuses"], statuses)
 
+    def test_web_route_splits_multiple_npi_matches_into_visible_rows(self):
+        npi_results = [
+            {
+                "npi": "1111111111",
+                "name": "Alexandra McWilliams",
+                "specialty": "Internal Medicine",
+                "location": "DALLAS, TX 75201",
+            },
+            {
+                "npi": "2222222222",
+                "name": "Alexis McWilliams",
+                "specialty": "Family Medicine",
+                "location": "DALLAS, TX 75201",
+            },
+        ]
+        checked_npis = []
+
+        def fake_check(provider_name, provider_type, provider_npis, networks, place):
+            checked_npis.append((provider_name, [result["npi"] for result in provider_npis]))
+            return {
+                "bcbstx:blue_advantage_hmo": {
+                    "status": "out",
+                    "source": "CMS Marketplace API",
+                    "detail": f"Checked {provider_name}.",
+                }
+            }
+
+        with patch.object(web_app, "search_npi", return_value=npi_results), \
+             patch.object(web_app, "check_network_statuses", side_effect=fake_check):
+            client = web_app.app.test_client()
+            response = client.get("/search?doctors=Dr.+Alexander+McWilliams")
+
+        self.assertEqual(response.status_code, 200)
+        providers = response.json["providers"]
+        self.assertEqual([provider["provider"] for provider in providers], [
+            "Alexandra McWilliams",
+            "Alexis McWilliams",
+        ])
+        self.assertEqual([provider["requested_provider"] for provider in providers], [
+            "Dr. Alexander McWilliams",
+            "Dr. Alexander McWilliams",
+        ])
+        self.assertEqual([provider["npi_results"][0]["npi"] for provider in providers], [
+            "1111111111",
+            "2222222222",
+        ])
+        self.assertEqual(checked_npis, [
+            ("Alexandra McWilliams", ["1111111111"]),
+            ("Alexis McWilliams", ["2222222222"]),
+        ])
+
     def test_web_route_returns_carrier_source_map(self):
         with patch.object(web_app, "search_npi", return_value=[]):
             client = web_app.app.test_client()
@@ -1305,6 +1356,12 @@ class LookupTests(unittest.TestCase):
         self.assertIn("data-add-facility-text", html)
         self.assertIn("data-add-rx-text", html)
         self.assertIn("Add anyway", html)
+        self.assertIn("hiddenMatrixRows.clear()", html)
+        self.assertIn("hiddenMatrixColumns.clear()", html)
+        self.assertIn("data-hide-row", html)
+        self.assertIn("data-hide-column", html)
+        self.assertIn("Hide row", html)
+        self.assertIn("Hide column", html)
         self.assertNotIn(">Item</th>", html)
         self.assertNotIn("status-toggle", html)
         self.assertNotIn("providerNetworkStatuses", html)
