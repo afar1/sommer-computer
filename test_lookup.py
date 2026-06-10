@@ -250,6 +250,18 @@ class LookupTests(unittest.TestCase):
         self.assertIn("bcbstx:blue_advantage_hmo", provider["confirmed_network_ids"])
         self.assertEqual(provider["npi"], "")
 
+    def test_provider_search_route_returns_quick_care_facility_candidate(self):
+        with patch.object(web_app, "search_npi", return_value=[]):
+            client = web_app.app.test_client()
+            response = client.get("/providers/search?q=Quick+Care&type=facility&city=Corpus+Christi")
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["display_name"], "Bay Area Quick Care")
+        self.assertEqual(provider["provider_type"], "facility")
+        self.assertEqual(provider["source"], "Facility website")
+        self.assertEqual(provider["npi"], "")
+
     def test_auto_prefers_facility_for_facility_like_query_even_with_doctor_match(self):
         def fake_search(name, **kwargs):
             if kwargs["provider_type"] == "doctor":
@@ -955,6 +967,35 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(enriched["formulary_tiers"][0]["restriction_label"], "AC")
         self.assertEqual(enriched["formulary_tiers"][1]["tier_label"], "Tier 2")
         self.assertEqual(enriched["formulary_tiers"][1]["restriction_label"], "PA")
+
+    def test_formulary_pdf_text_lookup_prefers_matching_drug_row_tier(self):
+        text = """
+        minoxidil tab 2.5 mg, 10 mg 1
+        olmesartan medoxomil tab 5 mg, 20 mg, 40 mg (Benicar) 1
+        olmesartan medoxomil-hydrochlorothiazide tab 20-12.5 mg,
+        40-12.5 mg, 40-25 mg (Benicar hct)
+        1
+        PERINDOPRIL ERBUMINE - perindopril erbumine tab 2 mg, 8 mg 3
+        rosuvastatin calcium tab 5 mg, 10 mg, 20 mg, 40 mg (Crestor) 1
+        ADEMPAS - riociguat tab 0.5 mg, 1 mg, 1.5 mg, 2 mg, 2.5 mg 4 LD, PA, QL
+        MOUNJARO - tirzepatide soln auto-injector 2.5 mg/0.5ml 2 PA, QL (4 pens/180 days)
+        MOUNJARO - tirzepatide soln auto-injector 5 mg/0.5ml,
+        7.5 mg/0.5ml, 10 mg/0.5ml, 12.5 mg/0.5ml, 15 mg/0.5ml
+        2 PA, QL
+        """
+
+        self.assertEqual(
+            web_app.search_formulary_text_for_tier(text, ["Olmesartan"])["tier_label"],
+            "Tier 1",
+        )
+        self.assertEqual(
+            web_app.search_formulary_text_for_tier(text, ["Rosuvastatin"])["tier_label"],
+            "Tier 1",
+        )
+        self.assertEqual(
+            web_app.search_formulary_text_for_tier(text, ["Mounjaro"])["tier_label"],
+            "Tier 2",
+        )
 
     def test_route_uses_exact_prescription_selection_rxcui(self):
         selection = [{

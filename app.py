@@ -137,6 +137,7 @@ TEXAS_LOCATIONS = {
     "mckinney": (33.1972, -96.6397),
     "denton": (33.2148, -97.1331),
     "richardson": (32.9483, -96.7299),
+    "corpus christi": (27.8006, -97.3964),
 }
 
 TEXAS_MARKETPLACE_PLACES = {
@@ -152,6 +153,7 @@ TEXAS_MARKETPLACE_PLACES = {
     "mckinney": {"zipcode": "75070", "countyfips": "48085", "state": "TX"},
     "denton": {"zipcode": "76201", "countyfips": "48121", "state": "TX"},
     "richardson": {"zipcode": "75080", "countyfips": "48113", "state": "TX"},
+    "corpus christi": {"zipcode": "78418", "countyfips": "48355", "state": "TX"},
 }
 
 SOURCE_CHECK_DATE = "2026-05-13"
@@ -390,6 +392,21 @@ KNOWN_FACILITY_DIRECTORY_CANDIDATES = [
             "bcbstx:blue_advantage_hmo",
             "bcbstx:my_blue_health",
         ],
+    },
+    {
+        "display_name": "Bay Area Quick Care",
+        "name": "Bay Area Quick Care",
+        "aliases": [
+            "quick care",
+            "bay area quick care",
+        ],
+        "specialty": "Urgent care",
+        "address": "9929 S.P.I.D. Suite 109, Corpus Christi, TX 78418",
+        "location": "CORPUS CHRISTI, TX 78418",
+        "city": "Corpus Christi",
+        "source": "Facility website",
+        "source_detail": "Known urgent care location; NPI identity still needs confirmation.",
+        "confirmed_network_ids": [],
     },
 ]
 
@@ -4542,7 +4559,15 @@ def formulary_lookup_terms(prescription):
 
 
 def formulary_line_tier(line):
-    text = re.sub(r"\d+\.\d+", " ", line)
+    text = re.sub(r"\([^)]*\)", " ", line)
+    text = re.sub(r"\d+\.\d+", " ", text)
+    requirement_match = re.search(
+        r"(?<![\w.-])([1-6])(?![\w.-])\s+(?:LD,\s*)?(?:PA|ST|QL|AC|LD)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if requirement_match:
+        return requirement_match.group(1)
     matches = re.findall(r"(?<![\w.-])([1-6])(?![\w.-])", text)
     return matches[-1] if matches else ""
 
@@ -4562,6 +4587,13 @@ def search_formulary_text_for_tier(text, terms):
         normalized_line = normalize_search_text(line)
         if not any(term and term in normalized_line for term in normalized_terms):
             continue
+        tier = formulary_line_tier(line)
+        if tier:
+            return {
+                "tier_label": f"Tier {tier}",
+                "tier_detail": f"Drug Tier: {tier}",
+                "restriction_label": formulary_line_requirements(line),
+            }
         window = " ".join(lines[index:index + 5])
         tier = formulary_line_tier(window)
         if tier:
