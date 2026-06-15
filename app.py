@@ -408,6 +408,55 @@ KNOWN_FACILITY_DIRECTORY_CANDIDATES = [
         "source_detail": "Known urgent care location; NPI identity still needs confirmation.",
         "confirmed_network_ids": [],
     },
+    {
+        "display_name": "Medical City Dallas Hospital",
+        "name": "Medical City Dallas Hospital",
+        "aliases": [
+            "medical city",
+            "medical city dallas",
+            "medical city hospital",
+        ],
+        "specialty": "Hospital",
+        "address": "7777 Forest Lane, Dallas, TX 75230",
+        "location": "DALLAS, TX 75230",
+        "city": "Dallas",
+        "source": "BCBS carrier directory",
+        "source_detail": "Carrier directory confirms Medical City Dallas Hospital in Blue Advantage HMO and MyBlue Health; NPI identity still needs confirmation.",
+        "confirmed_network_ids": [
+            "bcbstx:blue_advantage_hmo",
+            "bcbstx:my_blue_health",
+        ],
+    },
+]
+
+KNOWN_PROVIDER_NETWORK_CONFIRMATIONS = [
+    {
+        "provider_type": "doctor",
+        "display_name": "Bruce Henry",
+        "aliases": [
+            "bruce henry",
+            "dr bruce henry",
+            "dr. bruce henry",
+        ],
+        "npis": ["1861404824"],
+        "confirmed_network_ids": [
+            "bcbstx:my_blue_health",
+        ],
+    },
+    {
+        "provider_type": "facility",
+        "display_name": "Medical City Dallas Hospital",
+        "aliases": [
+            "medical city",
+            "medical city dallas",
+            "medical city hospital",
+        ],
+        "npis": ["1851599245"],
+        "confirmed_network_ids": [
+            "bcbstx:blue_advantage_hmo",
+            "bcbstx:my_blue_health",
+        ],
+    },
 ]
 
 
@@ -3879,6 +3928,8 @@ def facility_search_queries(name):
             "Baylor St. Luke's Medical Center",
             "St. Luke's Health",
         ])
+    if corrected == "medical city":
+        queries.append("Medical City Dallas")
     return unique_search_queries(queries)
 
 
@@ -3916,6 +3967,34 @@ def carrier_search_name(requested_name, provider_type, npi_results):
             if result.get("npi") and resolved_name:
                 return resolved_name
     return requested_name
+
+
+def confirmed_carrier_network_ids_for_provider(provider_name, provider_type, npi_results):
+    provider_name_text = normalize_search_text(provider_name).replace(".", "")
+    npi_values = {
+        str(result.get("npi", "")).strip()
+        for result in npi_results or []
+        if result.get("npi")
+    }
+    confirmed_ids = []
+    for confirmation in KNOWN_PROVIDER_NETWORK_CONFIRMATIONS:
+        if confirmation["provider_type"] != provider_type:
+            continue
+        aliases = [
+            confirmation.get("display_name", ""),
+            *confirmation.get("aliases", []),
+        ]
+        alias_match = any(
+            normalize_search_text(alias).replace(".", "") == provider_name_text
+            for alias in aliases
+        )
+        npi_match = bool(npi_values & set(confirmation.get("npis", [])))
+        if not alias_match and not npi_match:
+            continue
+        for network_id in confirmation.get("confirmed_network_ids", []):
+            if network_id not in confirmed_ids:
+                confirmed_ids.append(network_id)
+    return confirmed_ids
 
 
 def search_provider_npi(name, state="TX", city=None, specialty=None, limit=10, provider_type="doctor"):
@@ -5396,8 +5475,15 @@ def search():
             network_statuses = check_network_statuses(
                 provider_name, resolved_provider_type, provider_npi_results, networks, marketplace_place
             )
+            confirmed_network_ids = [
+                *doctor.get("confirmed_network_ids", []),
+                *confirmed_carrier_network_ids_for_provider(
+                    provider_name, resolved_provider_type, provider_npi_results
+                ),
+            ]
+            confirmed_network_ids = list(dict.fromkeys(confirmed_network_ids))
             network_statuses = apply_confirmed_carrier_network_statuses(
-                network_statuses, provider_name, networks, doctor.get("confirmed_network_ids", [])
+                network_statuses, provider_name, networks, confirmed_network_ids
             )
 
             results.append({
@@ -5413,7 +5499,7 @@ def search():
                 "source": doctor.get("source", ""),
                 "source_detail": doctor.get("source_detail", ""),
                 "selection_type": doctor.get("selection_type", ""),
-                "confirmed_network_ids": doctor.get("confirmed_network_ids", []),
+                "confirmed_network_ids": confirmed_network_ids,
                 "npi_found": len(provider_npi_results) > 0,
                 "npi_count": len(provider_npi_results),
                 "npi_results": provider_npi_results[:5],

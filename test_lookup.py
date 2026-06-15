@@ -237,6 +237,11 @@ class LookupTests(unittest.TestCase):
         self.assertIn("Baylor St. Luke's Medical Center", queries)
         self.assertIn("St. Luke's Health", queries)
 
+    def test_facility_search_queries_include_medical_city_alias(self):
+        queries = web_app.facility_search_queries("Medical City")
+
+        self.assertIn("Medical City Dallas", queries)
+
     def test_provider_search_route_returns_directory_facility_candidates(self):
         with patch.object(web_app, "search_npi", return_value=[]):
             client = web_app.app.test_client()
@@ -260,6 +265,23 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(provider["display_name"], "Bay Area Quick Care")
         self.assertEqual(provider["provider_type"], "facility")
         self.assertEqual(provider["source"], "Facility website")
+        self.assertEqual(provider["npi"], "")
+
+    def test_provider_search_route_returns_medical_city_facility_candidate(self):
+        with patch.object(web_app, "search_npi", return_value=[]):
+            client = web_app.app.test_client()
+            response = client.get("/providers/search?q=Medical+City&type=facility&city=Dallas")
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["display_name"], "Medical City Dallas Hospital")
+        self.assertEqual(provider["provider_type"], "facility")
+        self.assertEqual(provider["specialty"], "Hospital")
+        self.assertEqual(provider["source"], "BCBS carrier directory")
+        self.assertEqual(provider["confirmed_network_ids"], [
+            "bcbstx:blue_advantage_hmo",
+            "bcbstx:my_blue_health",
+        ])
         self.assertEqual(provider["npi"], "")
 
     def test_auto_prefers_facility_for_facility_like_query_even_with_doctor_match(self):
@@ -457,6 +479,53 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(
             [group["carrier"] for group in response.json["sources"]],
             ["BCBS"],
+        )
+
+    def test_search_route_applies_bruce_henry_myblue_confirmation(self):
+        out_statuses = {
+            "bcbstx:blue_advantage_hmo": web_app.make_network_status(
+                "out",
+                "CMS Marketplace API",
+                "CMS did not mark the NPI covered.",
+            ),
+            "bcbstx:my_blue_health": web_app.make_network_status(
+                "out",
+                "CMS Marketplace API",
+                "CMS did not mark the NPI covered.",
+            ),
+        }
+        npi_results = [{
+            "npi": "1861404824",
+            "name": "BRUCE HENRY",
+            "credential": "M.D.",
+            "specialty": "Family Medicine",
+            "address": "7777 FOREST LN A222, DALLAS, TX 75230",
+            "location": "DALLAS, TX 75230",
+            "phone": "972-566-7970",
+        }]
+
+        with patch.object(web_app, "search_npi", return_value=npi_results), \
+             patch.object(web_app, "check_network_statuses", return_value=out_statuses):
+            client = web_app.app.test_client()
+            response = client.get(
+                "/search?doctors=Bruce+Henry&carrier_filter_submitted=true&carriers=bcbstx"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json["providers"][0]
+        self.assertEqual(provider["provider"], "Bruce Henry")
+        self.assertEqual(provider["confirmed_network_ids"], ["bcbstx:my_blue_health"])
+        self.assertEqual(
+            provider["network_statuses"]["bcbstx:blue_advantage_hmo"]["status"],
+            "out",
+        )
+        self.assertEqual(
+            provider["network_statuses"]["bcbstx:my_blue_health"]["status"],
+            "in",
+        )
+        self.assertEqual(
+            provider["network_statuses"]["bcbstx:my_blue_health"]["source"],
+            "BCBS carrier directory",
         )
 
     def test_source_freshness_check_records_metadata(self):
